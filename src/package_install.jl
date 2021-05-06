@@ -3,7 +3,6 @@ using Pkg
 ts = ["Arpack",
       "Combinatorics",
       "Distributions",
-      "FLoops",
       "LaTeXStrings",
       "LinearAlgebra",
       "Printf",
@@ -12,7 +11,6 @@ ts = ["Arpack",
       "SIMD",
       "StatsBase",
       "TimerOutputs",
-      "ThreadPools",
       "WignerSymbols"]
 for tmp in ts
     Pkg.add(tmp)
