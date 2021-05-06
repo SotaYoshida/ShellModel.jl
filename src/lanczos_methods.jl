@@ -1,7 +1,7 @@
 function TRL(vks,uks,Tmat,k,
-              pbits,nbits,jocc_p,jocc_n,
-              SPEs,ppinfo,nninfo,bis,bfs,block_tasks,
-              p_NiNfs,n_NiNfs,Mps,delMs,Vpn,
+             pbits,nbits,jocc_p,jocc_n,
+             SPEs,ppinfo,nninfo,bis,bfs,block_tasks,
+             p_NiNfs,n_NiNfs,Mps,delMs,Vpn,
               eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
              tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos=false)
     mdim = tdims[end]
@@ -719,4 +719,3 @@ function bl_operate_J!(q,Rvec,Jv,
     end
     return nothing
 end
-

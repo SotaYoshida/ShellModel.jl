@@ -1,7 +1,3 @@
-using LaTeXStrings
-using PyCall
-@pyimport matplotlib.pyplot as plt
-
 function J2_to_J(J2)
     J=""
     if Int(J2) % 2 == 0
@@ -424,7 +420,7 @@ function solveEC(Hs,target_nuc,tJNs;
         end                
     end
     if length(Hs) > 1 && exact_logf != "" 
-        @timeit to "scatter plot" plot_EC_scatter(target_nuc,sumV,tJNs,Dims,exlines)
+        @timeit to "scatter plot" plot_EC_scatter(target_nuc,Hs,sumV,tJNs,Dims,exlines)
     end
     if is_show
         show(to, allocations = true, compact = false)
@@ -961,7 +957,7 @@ function read_exact(target_nuc,targetJ,sntf,lines)
     return []
 end
 
-function plot_EC_scatter(target_nuc,sumV,tJNs,Dims,exlines)
+function plot_EC_scatter(target_nuc,Hs,sumV,tJNs,Dims,exlines)
     js = [ tJNs[i][1] for i=1:length(tJNs)]
     xs = [ Float64[] for i=1:length(js)]
     ys = [ Float64[] for i=1:length(js)]

@@ -1,8 +1,5 @@
-include("./src/shellmodel_main.jl")
-include("./src/lanczos_methods.jl")
-include("./src/transit.jl")
-include("./src/input_int_snt.jl")
-include("./src/eigenvector_continuation.jl")
+include("./src/ShellModel.jl")
+using .ShellModel
 
 """
 Arguments for main: digonalize the model-space Hamiltonian
@@ -17,13 +14,12 @@ lm = 100        # number of Lanczos vectors
 ls = 15         # number of vectors to be used for Thick-Restart
 tol= 1.e-6      # tolerance for convergence check in the Lanczos methods
 """
-function samplerun(num_ev=10)
+function run(num_ev=10)
     ### for compilation
     println("For JIT compilation...")
     main("./snts/x_mass.snt","Be8",5,[0])
     main("./snts/x_mass.snt","Be8",5,[0];is_block=true,q=3)
     println("Done: JIT compilation")
-
     ### input
     tJ = 0 # target J
     tJs =[ tJ ]   
@@ -50,9 +46,8 @@ function samplerun(num_ev=10)
     println("\n+ preprocessing")
     @time main(sntf,target_nuc,num_ev,tJs;is_block=true,q=n_block,
                in_wf="./appwavs/"*target_nuc*"_usdb_j"*string(tJ)*".appwav")
-
 end
-samplerun()
+run()
 
 
 
