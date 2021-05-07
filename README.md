@@ -1,4 +1,4 @@
-# ShellModel.jl v0.1.0  
+# ShellModel.jl (v0.1.0)  
 <img src="https://github.com/SotaYoshida/ShellModel.jl/blob/main/SMjl_logo.png" width=70%>
 
 **The ShellModel.jl is Julia code for nuclear shell-model calculations.**  
