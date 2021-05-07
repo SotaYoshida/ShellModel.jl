@@ -1,4 +1,10 @@
-# ShellModel.jl (v0.1.0)  
+# ShellModel.jl (v0.1.0)
+
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://SotaYoshita.github.io/ShellModel.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://SotaYoshita.github.io/ShellModel.jl/dev)
+[![Build Status](https://travis-ci.com/SotaYoshita/ShellModel.jl.svg?branch=master)](https://travis-ci.com/SotaYoshita/ShellModel.jl)
+
+
 <img src="https://github.com/SotaYoshida/ShellModel.jl/blob/main/SMjl_logo.png" width=70%>
 
 **Julia code for nuclear shell-model calculations**  

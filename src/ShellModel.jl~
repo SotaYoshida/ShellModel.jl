@@ -11,10 +11,10 @@ using Random
 using SIMD
 using StatsBase
 using TimerOutputs
-#using ThreadPools
+#using ThreadPools # not used now
 using WignerSymbols
-using PyCall
-@pyimport matplotlib.pyplot as plt
+#using PyCall
+#@pyimport matplotlib.pyplot as plt
 
 include("lanczos_methods.jl")
 include("transit.jl")
@@ -22,7 +22,7 @@ include("input_int_snt.jl")
 include("eigenvector_continuation.jl")
 
 # from shellmodel.
-export main #,samplerun
+export main,samplerun
 # from eigenvector_continuation.jl
 export prepEC,solveEC,solveEC_UQ
 # from transit.jl
@@ -1563,7 +1563,7 @@ function operate_J!(Rvec,Jv,
     return nothing
 end
 
-function samplerun(num_ev=10)
+function samplerun()
     ### for compilation
     println("For JIT compilation...")
     @time main("./snts/x_mass.snt","Be8",5,[0])
