@@ -18,7 +18,7 @@ WignerSymbols = "9f57e263-0b3d-5e2e-b1be-24f2bb48858b"
 
 [compat]
 julia = "1.5, 1.6"
-Arapack = "0.5"
+Arpack = "0.5"
 Distributions ="0.24"
 TimerOutputs = "0.5"
 SIMD = "3.2"
