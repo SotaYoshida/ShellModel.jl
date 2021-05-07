@@ -48,10 +48,10 @@ For more details, please check docs (**not yet provided**).
 
 > Note: 
 > The samplecode is to calc.  
-> (a). 10 lowest states of 28Si in sd shell  
-> (b). 10 lowest states of 28Si with J=0  
-> (c). EC estimates of 10 lowest J=0 states of 28Si  
-> (d). (b). with the preprocessing  
+> (a) 10 lowest states of 28Si in sd shell  
+> (b) 10 lowest states of 28Si with J=0  
+> (c) EC estimates of 10 lowest J=0 states of 28Si  
+> (d) (b) with the preprocessing  
 
 ## Documentation 
 
