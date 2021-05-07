@@ -1,7 +1,0 @@
-using ShellModel
-using Test
-
-@testset "ShellModel.jl" begin
-    #--check-bounds=yes
-    @inbounds main("../snts/x_mass.snt","Be8",1,[])
-end

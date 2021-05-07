@@ -647,7 +647,6 @@ function read_appwav(inpf,mdim,V,q,verbose=false)
 end
 
 function ReORTH(it,vtarget,vks)
-    if it==1;return nothing;end
     @inbounds for l = it:-1:1
         v = vks[l]
         axpy!(-dot(v,vtarget),v,vtarget)
