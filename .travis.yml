@@ -3,11 +3,11 @@ language: julia
 notifications:
   email: false
 julia:
-  - 1.0
   - 1.6
   - nightly
 os:
   - linux
+  - osx
 arch:
   - x64
 cache:
@@ -19,7 +19,7 @@ jobs:
     - julia: nightly
   include:
     - stage: Documentation
-      julia: 1
+      julia: 1.6
       script: |
         julia --project=docs --check-bounds=no -e '
           using Pkg
