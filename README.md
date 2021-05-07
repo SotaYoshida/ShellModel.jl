@@ -1,5 +1,8 @@
 # ShellModel.jl (v0.1.0)
 
+[![Build Status](https://travis-ci.org/SotaYoshida/ShellModel.jl.svg?branch=ver0.1.0)](https://travis-ci.org/SotaYoshida/ShellModel.jl)
+
+
 <img src="https://github.com/SotaYoshida/ShellModel.jl/blob/main/SMjl_logo.png" width=70%>
 
 **Julia code for nuclear shell-model calculations**  
