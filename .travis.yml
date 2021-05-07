@@ -1,13 +1,33 @@
+# Documentation: http://docs.travis-ci.com/user/languages/julia
 language: julia
-os:
-  - linux
-  - osx
-julia:
-  - 1.5
-  - 1.6
-  - nightly
-matrix:
-  allow_failures:
-    - julia: nightly
 notifications:
   email: false
+julia:
+  - 1.0
+  - 1.6
+  - nightly
+os:
+  - linux
+arch:
+  - x64
+cache:
+  directories:
+    - ~/.julia/artifacts
+jobs:
+  fast_finish: true
+  allow_failures:
+    - julia: nightly
+  include:
+    - stage: Documentation
+      julia: 1
+      script: |
+        julia --project=docs --check-bounds=no -e '
+          using Pkg
+          Pkg.develop(PackageSpec(path=pwd()))
+          Pkg.instantiate()
+          using Documenter: DocMeta, doctest
+          using ShellModel
+          DocMeta.setdocmeta!(ShellModel, :DocTestSetup, :(using ShellModel); recursive=true)
+          doctest(ShellModel)
+          include("docs/make.jl")'
+      after_success: skip
