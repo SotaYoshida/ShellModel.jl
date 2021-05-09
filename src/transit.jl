@@ -48,6 +48,7 @@ function init_ho_by_mass(A,ihwprm=1)
     if ihwprm == 1 ## 41A^(-1/3) MeV
         hw = 41.0 * (A^(-1.0/3.0))
     elseif ihwprm == 2 ## 45A^(-1/3)-25A^(-2/3) MeV
+        #J. Blomqvist and A. Molinari, Nucl. Phys. A106, 545 (1968).
         hw = 45.0 * (A^(-1.0/3.0)) -25.0 * (A^(-2.0/3.0))
     end
     bpar = hc/sqrt(hw*amass)
