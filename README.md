@@ -48,8 +48,6 @@ $julia -t 12 sample_run.jl
 One can specify the number of execution threads like this.  
 (The -t/--threads command line argument requires at least Julia >= 1.5.)  
 
-For more details, please check docs (**not yet provided**).
-
 > Note: 
 > The samplecode is to calc.  
 > (a) 10 lowest states of 28Si in sd shell  
@@ -59,8 +57,7 @@ For more details, please check docs (**not yet provided**).
 
 ## Documentation 
 
-in prep.  
-Some brief docstring can be found [here](https://github.com/SotaYoshida/ShellModel.jl/blob/master/docs/build/index.html)
+[here](https://sotayoshida.github.io/ShellModel.jl/dev/)
 
 ## Features
 * Pros (Some are "Pros" of the Julia language though :D)
