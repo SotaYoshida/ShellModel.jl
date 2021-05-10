@@ -1,6 +1,7 @@
 # ShellModel.jl (v0.1.0)
 
-[![Build Status](https://travis-ci.com/SotaYoshida/ShellModel.jl.svg?branch=master)](https://travis-ci.com/SotaYoshida/ShellModel.jl)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://SotaYoshida.github.io/ShellModel.jl/dev)
+[![Build Status](https://github.com/SotaYoshida/Pkgtest.jl/workflows/CI/badge.svg)](https://github.com/SotaYoshida/ShellModel.jl/actions)
 
 <img src="https://github.com/SotaYoshida/ShellModel.jl/blob/master/SMjl_logo.png" width=70%>
 
