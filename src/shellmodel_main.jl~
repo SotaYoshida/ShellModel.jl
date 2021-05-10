@@ -267,9 +267,6 @@ function HbitT1(p_sps::Array{Array{Int64,1}},
     return bV1,V1 #bVpp,Vpp,bVnn,Vnn
 end
 
-"""
-make bit representation of T=0 (proton-neutron) interactions for each {m_z}
-"""
 function Hbitpn(p_sps::Array{Array{Int64,1}},
                 n_sps::Array{Array{Int64,1}},
                 mstates_p::Array{Array{Int64,1},1},
@@ -1031,7 +1028,7 @@ Digonalize the model-space Hamiltonian
 - sntf:       path to input interaction file (.snt fmt)
 - target_nuc: target nucleus
 - num_ev:     number of eigenstates to be evaluated
-- target_J:   target total J (specified by e.g. [0]). Set to [] if you want lowest states with any J. 
+- target_J:   target total J (specified by e.g. [0]). Set to [] to eval. lowest states with any J. 
    Note that J should be doubled (J=0=>[0], J=1/2=>[1], J=1=>[2],...) 
 
 # Optional arguments:
