@@ -126,7 +126,8 @@ function readsnt(sntf,Anum) # now the code supports .snt(KSHELL) format only.
 end
 
 """
-function def_mstates
+    function def_mstates
+
 to define the single particle states specified by m_z
 """
 function def_mstates(p_sps,n_sps)
@@ -144,11 +145,14 @@ function def_mstates(p_sps,n_sps)
 end
 
 """
+    function all_perm!(ln::Int64,num_valence::Int64,occs::Array{Array{Bool,1}})
+
 make all possible permutation of 'bits'
 
 Example:
 If 2 protons and 1 neutron are in 0p shell space,
 valence orbits(0p1/2,0p3/2) => -1/2, 1/2, -3/2, -1/2, 1/2, 3/2
+
 configurations are represented like:
  proton: 000011, 000101, ..., 110000
 neutron: 000001, 000010, ..., 100000
@@ -196,6 +200,13 @@ function initialize_tvec!(tvec::Array{Bool,1})
 end
 
 """
+    function HbitT1(p_sps::Array{Array{Int64,1}},
+                n_sps::Array{Array{Int64,1}},
+                mstates_p::Array{Array{Int64,1},1},
+                mstates_n::Array{Array{Int64,1},1},
+                labels::Array{Array{Array{Int64,1},1},1},
+                TBMEs::Array{Array{Float64,1}})
+
 make bit representation of T=1 (proton-proton&neutron-neutron) interactions for each {m_z}
 """
 function HbitT1(p_sps::Array{Array{Int64,1}},
@@ -268,6 +279,10 @@ function HbitT1(p_sps::Array{Array{Int64,1}},
 end
 
 """
+    Hbitpn(p_sps::Array{Array{Int64,1}},n_sps::Array{Array{Int64,1}},
+          mstates_p::Array{Array{Int64,1},1},mstates_n::Array{Array{Int64,1},1},
+          labels::Array{Array{Int64,1}},TBMEs::Array{Float64,1},zeroME=false)
+
 make bit representation of T=0 (proton-neutron) interactions for each {m_z}
 """
 function Hbitpn(p_sps::Array{Array{Int64,1}},
@@ -367,6 +382,14 @@ function deltaf(i::Int64,j::Int64)
 end
 
 """
+    occ(p_sps::Array{Array{Int64,1}},
+             mstates_p::Array{Array{Int64,1}},
+             mzp::Array{Int64,1},num_vp::Int64,
+             n_sps::Array{Array{Int64,1}},
+             mstates_n::Array{Array{Int64,1}},
+             mzn::Array{Int64,1},num_vn::Int64,
+             Mtot::Int64)
+
 prepare bit representations of proton/neutron Slater determinants => pbits/nbits
 
 jocc_p, jocc_n: corresponding occupation numbers for a "j" state,  
