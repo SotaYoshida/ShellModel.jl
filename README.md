@@ -1,7 +1,7 @@
 # ShellModel.jl (v0.1.0)
 
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://SotaYoshida.github.io/ShellModel.jl/dev)
-[![Build Status](https://github.com/SotaYoshida/Pkgtest.jl/workflows/CI/badge.svg)](https://github.com/SotaYoshida/ShellModel.jl/actions)
+[![Build Status](https://github.com/SotaYoshida/ShellModel.jl/workflows/CI/badge.svg)](https://github.com/SotaYoshida/ShellModel.jl/actions)
 
 <img src="https://github.com/SotaYoshida/ShellModel.jl/blob/master/SMjl_logo.png" width=70%>
 
