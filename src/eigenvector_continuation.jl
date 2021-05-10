@@ -306,6 +306,13 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
     return nothing
 end
 
+"""
+    solveEC(Hs,target_nuc,tJNs;write_appwav=false,verbose=false,
+            calc_moment=true,wpath="./",is_show=false,
+            gfactors = [1.0,0.0,5.586,-3.826],effcharge=[1.5,0.5],
+            exact_logf="")
+
+"""
 function solveEC(Hs,target_nuc,tJNs;
                  write_appwav=false,verbose=false,
                  calc_moment=true,wpath="./",
