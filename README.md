@@ -59,7 +59,7 @@ For more details, please check docs (**not yet provided**).
 ## Documentation 
 
 in prep.  
-Some brief docstring can be found [here](https://github.com/SotaYoshida/ShellModel.jl/blob/main/docs/build/index.html)
+Some brief docstring can be found [here](https://github.com/SotaYoshida/ShellModel.jl/blob/master/docs/build/index.html)
 
 ## Features
 * Pros (Some are "Pros" of the Julia language though :D)
@@ -102,7 +102,7 @@ Any suggestions, feedbacks, and "Issues&Pull requests" are welcomed.
 
 ## Licence  
 
-[MIT License, Copyright (c) 2021 Sota Yoshida](https://github.com/SotaYoshida/ShellModel.jl/blob/main/LICENSE)
+[MIT License, Copyright (c) 2021 Sota Yoshida](https://github.com/SotaYoshida/ShellModel.jl/blob/master/LICENSE)
 
 
 ## How to cite  
