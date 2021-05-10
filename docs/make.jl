@@ -6,11 +6,11 @@ DocMeta.setdocmeta!(ShellModel, :DocTestSetup, :(using ShellModel); recursive=tr
 makedocs(;
     modules=[ShellModel],
     authors="SotaYoshida <s.yoshida@nt.phys.s.u-tokyo.ac.jp> and contributors",
-    repo="https://github.com/SotaYoshida/ShellModel.jl/blob/{commit}{path}#{line}",
+    repo="https://github.com/SotaYoshita/ShellModel.jl/blob/{commit}{path}#{line}",
     sitename="ShellModel.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://SotaYoshida.github.io/ShellModel.jl",
+        canonical="https://SotaYoshita.github.io/ShellModel.jl",
         assets=String[],
     ),
     pages=[
@@ -19,5 +19,5 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/SotaYoshida/ShellModel.jl",
+    repo="github.com/SotaYoshita/ShellModel.jl.git",
 )
