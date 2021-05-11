@@ -1599,8 +1599,8 @@ Sample scripts to calculate
 -(d) (b) with the preprocessing
 
 !!! note
-    To run ```samplerun()```, you need a copy of ShellModel.jl in your environment.
-    Try the following and then execute `samplerun()` in the repository.
+    To run ```samplerun()```, you need a copy of ShellModel.jl in your environment and execute this in the repository clone.
+    Try e.g., 
     ```sh
     git clone https://github.com/SotaYoshida/ShellModel.jl
     ```    

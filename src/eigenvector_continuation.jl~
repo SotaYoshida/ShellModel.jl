@@ -313,9 +313,9 @@ end
 
 To solve EC (generalized eigenvalue problem) to approximate the eigenpairs for a given interaction.
 ```math
-H \\vec{v} = \\lambda N \\vec{v}
+H \vec{v} = \lambda N \vec{v}
 ```
-Transition densities and overlap matrix for H and N are read from "tdmat/" directory (To be changed to more flexible)
+Transition densities and overlap matrix for H and N are read from "tdmat/" directory (To be changed to a more versatile method)
 
 # Arguments:
 - `Hs`:array of paths to interaction files (.snt fmt)
