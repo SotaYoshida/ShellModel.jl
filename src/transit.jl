@@ -546,7 +546,7 @@ Calculate the M1&E2 transitions for two wavefunctions
 - `target_nuc`:target nucleus in string e.g., "Si28"
 - `jl2`:J*2 for the left w.f.
 - `jr2`:J*2 for the right w.f.
-- `in_wfs`:["path\_to\_left\_wf","path\_to\_right\_wf"]
+- `in_wfs`:["path to left wf","path to right wf"]
 
 # Optional arguments
 - `num_ev_l=100`:upper limit of the number of eigenvectors for the left w.f.
