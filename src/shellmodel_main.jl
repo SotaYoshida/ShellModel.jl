@@ -279,7 +279,8 @@ To read interaction file in ".snt" format.
 - `Anum`: mass number (used for "scaling" of TBMEs)
 
 !!! note
-    The current version supports .snt(KSHELL) fmt only.
+    The current version supports .snt(KSHELL) fmt only and "properly" ordered .snt file (a<=b,c<=d,a<=c for V(abcd;J).
+    A .snt file can be re-ordered by the Python script at "ShellModel.jl/src/make_ordered_snt.py"(, which will be replaced by Julia implementation...).
 
 """
 function readsnt(sntf,Anum) 
@@ -1593,10 +1594,10 @@ end
     samplerun()
 
 Sample scripts to calculate
--(a) 10 lowest states of 28Si in sd shell
--(b) 10 lowest states of 28Si with J=0
--(c) EC estimates of 10 lowest J=0 states of 28Si
--(d) (b) with the preprocessing
+- (a) 10 lowest states of 28Si in sd shell
+- (b) 10 lowest states of 28Si with J=0
+- (c) EC estimates of 10 lowest J=0 states of 28Si
+- (d) (b) with the preprocessing
 
 !!! note
     To run ```samplerun()```, you need a copy of ShellModel.jl in your environment.
