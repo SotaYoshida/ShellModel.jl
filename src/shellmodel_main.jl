@@ -279,8 +279,7 @@ To read interaction file in ".snt" format.
 - `Anum`: mass number (used for "scaling" of TBMEs)
 
 !!! note
-    The current version supports only "properly ordered" .snt file (used in KSHELL).  
-
+    The current version supports only "properly ordered" interaction file in .snt format.
      
     A .snt file can be ordered to be a<=b,c<=d,a<=c for V(abcd;J) by the Python script "ShellModel.jl/src/make_ordered_snt.py"(, which will be replaced by Julia implementation...).
 
