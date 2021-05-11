@@ -534,10 +534,35 @@ function calc_bifs(Mps_l,Mns_l,Mtot_l,Mps_r,Mns_r,Mtot_r)
     return p_bifs,n_bifs
 end
 
+"""
+    transit_main(sntf,target_nuc,jl2,jr2,in_wfs;
+                 num_ev_l=100,num_ev_r=100,q=1,is_block=false,is_show=true,
+                 calc_EM=true,gfactors=[1.0,0.0,5.586,-3.826],eff_charge=[1.5,0.5])
+
+Calculate the M1&E2 transitions for two wavefunctions
+
+# Arguments
+- `sntf`:path to the interaction file
+- `target_nuc`:target nucleus in string e.g., "Si28"
+- `jl2`:J*2 for the left w.f.
+- `jr2`:J*2 for the right w.f.
+- `in_wfs`:["path_to_left_wf","path_to_right_wf"]
+
+# Optional arguments
+- `num_ev_l=100`:upper limit of the number of eigenvectors for the left w.f.
+- `num_ev_r=100`:upper limit of the number of eigenvectors for the right w.f.
+- `is_show=true`:to display the TimerOutput
+- `gfactors=[1.0,0.0,5.586,-3.826]`:g factors [glp,gln,gsp,gsn]
+- `eff_charge=[1.5,0.5]`:effective charges [ep,en]
+
+# Optional arguments (not used, but for future developments)
+- `q=1`:block size
+- `is_block=false`:to use Block algorithm
+"""
 function transit_main(sntf,target_nuc,jl2,jr2,in_wfs;
                       num_ev_l=100,num_ev_r=100,
-                      save_wav=false,q=1,is_block=false,is_show=true,
-                      forJIT=false,calc_moment = true,calc_EM=true,
+                      q=1,is_block=false,is_show=true,
+                      calc_EM=true,
                       gfactors=[1.0,0.0,5.586,-3.826],
                       eff_charge=[1.5,0.5])
     if length(in_wfs) == 0;println("input wfs must be specified");exit();end
