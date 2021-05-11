@@ -4,7 +4,7 @@ CurrentModule = ShellModel
 
 # ShellModel
 
-Documentation for [ShellModel](https://github.com/SotaYoshita/ShellModel.jl).
+Documentation for [ShellModel](https://github.com/SotaYoshida/ShellModel.jl).
 
 ```@index
 ```
