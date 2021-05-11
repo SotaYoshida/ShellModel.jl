@@ -1604,7 +1604,7 @@ Sample scripts to calculate
     To run ```samplerun()```, you need a copy of ShellModel.jl in your environment.
     Try e.g.,
     ```sh
-    \$git clone https://github.com/SotaYoshida/ShellModel.jl
+    git clone https://github.com/SotaYoshida/ShellModel.jl
     ```    
     and then, execute `samplerun()` in the repository:
     ```julia 
@@ -1613,7 +1613,7 @@ Sample scripts to calculate
     ```    
     or 
     ```sh
-    \$julia -t 12 sample_run.jl
+    julia -t 12 sample_run.jl
     ```    
 """
 function samplerun()
