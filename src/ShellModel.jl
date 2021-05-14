@@ -11,6 +11,7 @@ using Random
 using SIMD
 using StatsBase
 using TimerOutputs
+using ThreadPools # for @qthreads
 using WignerSymbols
 #using PyCall
 #@pyimport matplotlib.pyplot as plt

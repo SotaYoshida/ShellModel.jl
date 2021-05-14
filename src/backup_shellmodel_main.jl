@@ -50,16 +50,8 @@ struct Jpninfo
     njump::Array{ifph,1}
 end
 
-struct ppinfo
-    Ni::Int64
-    Nf::Int64
-    ofsti::Int64
-    ofstf::Int64
-    coef::Float64
-end
-struct nninfo
-    Ni::Int64
-    Nf::Int64
+struct T1info
+    f::Int64
     coef::Float64
 end
 
@@ -139,8 +131,8 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
         bVpn,Vpn,delMs = Hbitpn(p_sps,n_sps,mstates_p,mstates_n,labels[3],TBMEs[3])
 
         ## storing two-body jumps for pp/nn 2b interaction
-        ppinfos = prep_pp(mstates_p,pbits,nbits,tdims,bV1[1],V1[1])
-        nninfos = prep_nn(mstates_n,nbits,bV1[2],V1[2])
+        ppinfo = prep_pp(mstates_p,pbits,bV1[1],V1[1])
+        nninfo = prep_nn(mstates_n,nbits,bV1[2],V1[2])
         bV1 = nothing
 
         ## storing one-body jumps for pn 2b interaction
@@ -191,7 +183,7 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
                 bl_QR!(V',Beta_H,mdim,q)
             end
             elit = TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
-                        ppinfos,nninfos,
+                        ppinfo,nninfo,bifs,block_tasks,
                         jumps,tdims,
                         eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
                         num_ev,num_history,lm,ls_sub,en,tol,to,doubleLanczos)            
@@ -199,8 +191,9 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
             vks = [ zeros(Float64,mdim) for i=1:lm]
             uks = [ zeros(Float64,mdim) for i=1:ls]                
             initialize_wf(vks[1],"rand",tJ,mdim)
-            elit = TRL(vks,uks,Tmat,itmin,pbits,nbits,jocc_p,jocc_n,
-                       SPEs,ppinfos,nninfos,jumps,
+            elit = TRL(vks,uks,Tmat,itmin,
+                       pbits,nbits,jocc_p,jocc_n,SPEs,ppinfo,nninfo,
+                       jumps,
                        eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
                        tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos)
         end
@@ -998,36 +991,29 @@ end
 
 function prep_pp(mstates_p::Array{Array{Int64,1},1},
                  pbits::Array{Array{Int64,1}},
-                 nbits::Array{Array{Int64,1}},
-                 tdims,
                  bVpp::Array{bit2b,1},
                  Vpp::Array{Float64,1}) where {IA<:Array{Int64,1}}
     lMp=length(pbits)
     lmstates_p = length(mstates_p)
-    ppinfos = [ ppinfo[] for i = 1:lMp]
+    ppinfo = [ T1info[] for i = 1:lMp]
 
-    @inbounds @threads for bi = 1:lMp # number of proton subblock
+    @inbounds @threads for pblock_i = 1:lMp # number of proton subblock
         TF=[true]; ret=[1,-1]; ridx=[-1,-1,-1]
-        idim = tdims[bi]; l_Nn_i=length(nbits[bi])
-        pt = ppinfos[bi]
-        @inbounds for (Npi,Phi) in enumerate(pbits[bi])
+        @inbounds for (Npi,Phi) in enumerate(pbits[pblock_i])
             @inbounds for nth = 1:length(Vpp)
                 if Vpp[nth] == 0.0; continue;end
                 TF_connectable(Phi,bVpp[nth],TF)
                 if TF[1]==false; continue;end
                 calc_phase!(Phi,bVpp[nth],lmstates_p,ret)#ret=>phase,fpbit
-                bisearch!(pbits[bi],ret[2],ridx)#ridx=Npf
-                Npf = ridx[1]
-                if Npi <= Npf
-                    coef = Vpp[nth]*ret[1]*ifelse(Npi==Npf,0.5,1.0)
-                    o_i = idim + (Npi-1)*l_Nn_i
-                    o_f = idim + (Npf-1)*l_Nn_i
-                    push!(pt,ppinfo(Npi,Npf,o_i,o_f,coef))
+                bisearch!(pbits[pblock_i],ret[2],ridx)#ridx=Npf
+                if Npi <= ridx[1]
+                    coef = Vpp[nth]*ret[1]*ifelse(Npi==ridx[1],0.5,1.0)
+                    push!(ppinfo[pblock_i][Npi], T1info(ridx[1],coef))
                 end
             end
         end
     end
-    return ppinfos
+    return ppinfo
 end
 
 function prep_nn(mstates_n::Array{Array{Int64,1},1},
@@ -1036,26 +1022,24 @@ function prep_nn(mstates_n::Array{Array{Int64,1},1},
                  Vnn::Array{Float64,1}) where {IA<:Array{Int64,1}}
     lMn=length(nbits)
     lmstates_n = length(mstates_n)
-    nninfos = [ nninfo[ ]  for i = 1:lMn]
-    @inbounds @threads for bi = 1:lMn
+    nninfo = [ [ T1info[ ] for j=1:length(nbits[i]) ] for i = 1:lMn]
+    @inbounds @threads for nblock_i = 1:lMn
         TF=[true]; ret=[0,-1];ridx=[-1,-1,-1]
-        nt = nninfos[bi]
-        @inbounds for (Nni,Phi) in enumerate(nbits[bi])
+        @inbounds for (Nni,Phi) in enumerate(nbits[nblock_i])
             @inbounds for nth = 1:length(Vnn)
                 if Vnn[nth] == 0.0; continue;end
                 TF_connectable(Phi,bVnn[nth],TF)
                 if TF[1]==false; continue;end
                 calc_phase!(Phi,bVnn[nth],lmstates_n,ret)
-                bisearch!(nbits[bi],ret[2],ridx)
-                Nnf = ridx[1]
-                if Nni <= Nnf
-                    coef = Vnn[nth]*ret[1]*ifelse(Nni==Nnf,0.5,1.0)
-                    push!(nt,nninfo(Nni,Nnf,coef))
+                bisearch!(nbits[nblock_i],ret[2],ridx)
+                if Nni <= ridx[1]
+                    coef = Vnn[nth]*ret[1]*ifelse(Nni==ridx[1],0.5,1.0)
+                    push!(nninfo[nblock_i][Nni],T1info(ridx[1],coef))
                 end
             end
         end
     end
-    return nninfos
+    return nninfo
 end
 function prep_pn(lblock::Int64,tdims::IA,
                  l_pbit::Int64,l_nbit::Int64,
@@ -1075,8 +1059,7 @@ function prep_pn(lblock::Int64,tdims::IA,
         end
     end
     jumps = [ jump1b[ ] for i=1:nthreads()]
-    @inbounds @threads for bi = 1:lblock
-        tj = jumps[threadid()]        
+    @inbounds @threads for bi = 1:lblock 
         Vret = [0,0,0]
         for j = 1:length(bfs[bi])
             bf = bfs[bi][j]
@@ -1113,7 +1096,7 @@ function prep_pn(lblock::Int64,tdims::IA,
                     push!(nlist,nid(Nni,Nnf,ret[1]==-1))
                 end
                 if length(nlist) == 0 ;continue;end
-                push!(tj,jump1b(V,plist,nlist))
+                push!(jumps[threadid()],jump1b(V,plist,nlist))
             end
         end      
     end
@@ -1432,6 +1415,7 @@ function prep_J(tdims,p_sps,n_sps,
                         if fac==0.0;continue;end
                         vec_p_ani .= false; vec_p_cre .= false
                         vec_n_ani .= false; vec_n_cre .= false
+
                         if ud == 2  ### for pn down
                             @inbounds for k = 2:lp
                                 if mstates_p[k][1] != p_sps[pidx][1];continue;end
@@ -1520,7 +1504,7 @@ function prep_J(tdims,p_sps,n_sps,
 end
 
 function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
-                    oPP,oNN,oPNu,oPNd)
+                    oPP,oNN,oPNu,oPNd,beta_J=1.0)
     #to = TimerOutput()
     lblock=length(pbits)
     #@timeit to "pp/nn " begin
@@ -1533,7 +1517,7 @@ function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
         opNN = oNN[bi]
         offset = idim-lNn
         @inbounds for tmp in opPP
-            Npi =tmp.Mi; Npf=tmp.Mf; fac=tmp.fac 
+            Npi =tmp.Mi; Npf=tmp.Mf; fac=tmp.fac .* beta_J
             tMi = offset + Npi*lNn
             tMf = offset + Npf*lNn
             @inbounds @simd for nidx = 1:lNn
@@ -1543,7 +1527,7 @@ function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
             end
         end
         @inbounds for tmp in opNN #nn
-            Nni =tmp.Mi; Nnf=tmp.Mf; fac=tmp.fac
+            Nni =tmp.Mi; Nnf=tmp.Mf; fac=tmp.fac .* beta_J
             tMi = offset + Nni
             tMf = offset + Nnf
             @inbounds @simd for pidx = 1:lNp
@@ -1565,7 +1549,7 @@ function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
         @inbounds for top in operator
             pj = top.pjump
             nj = top.njump
-            fac =top.fac
+            fac =top.fac .* beta_J
             @inbounds for tmp_p in pj
                 phase_p=tmp_p.phase
                 tMi = off_i + tmp_p.i * l_Nn_i
@@ -1589,7 +1573,7 @@ function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
         @inbounds for top in operator
             pj  = top.pjump
             nj  = top.njump
-            fac = top.fac 
+            fac = top.fac .* beta_J
             @inbounds for tmp_p in pj
                 phase_p=tmp_p.phase
                 tMi = off_i + tmp_p.i * l_Nn_i

@@ -1,39 +1,33 @@
-function TRL(vks,uks,Tmat,k,
-             pbits,nbits,jocc_p,jocc_n,
-             SPEs,ppinfo,nninfo,bis,bfs,block_tasks,
-             p_NiNfs,n_NiNfs,Mps,delMs,Vpn,
-              eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
-             tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos=false)
+function TRL(vks,uks,Tmat,k,pbits,nbits,jocc_p,jocc_n,
+             SPEs,ppinfos,nninfos,jumps,
+             eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+             tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos=false;
+             Jtol = 1.e-6,JTF = [false])
     mdim = tdims[end]
     TF=[false]
-
-    lnJ = ls
-    Jvs = [zeros(Float64,mdim) for i=1:lnJ]
-    Jvret = [zeros(Float64,mdim)]
-    Jmat = zeros(Float64,lnJ,lnJ)
-    Jvs[1] .= vks[1]
-    Jtol = 1.e-6
-    JTF = [false];beta_J = 1.0
+    lnJ = nthreads(); if doubleLanczos;lnJ = maximum([lnJ,ls]);end
+    Jvret = [zeros(Float64,1)];Jmat = zeros(Float64,1,1)
+    Jvs = [zeros(Float64,mdim) for i=1:lnJ]    
     if doubleLanczos
-        Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
-                 pbits,nbits,tdims,eval_jj,
-                 Jidxs,oPP,oNN,oPNu,oPNd,beta_J,to)
+        Jvret = [zeros(Float64,mdim)]
+        Jmat = zeros(Float64,lnJ,lnJ)
+        Jvs[1] .= vks[1]
+        Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,pbits,nbits,tdims,eval_jj,
+                 Jidxs,oPP,oNN,oPNu,oPNd,to)
         vks[1] .= Jvs[1]
         for i=1:lnJ;Jvs[i] .=0.0;end
     end
     elit = 1
+    tvecs = @views Jvs[1:nthreads()]
     while TF[1]==false
         for it = k:lm-1
             vk =vks[it]; vkp1 =vks[it+1]
             @timeit to "operate H" begin
-                operate_H!(vk,vkp1,
-                           pbits,nbits,
-                           jocc_p,jocc_n,SPEs,
-                           ppinfo,nninfo,
-                           tdims,bis,bfs,block_tasks,
-                           p_NiNfs,n_NiNfs,Vpn,Mps,delMs,to)
+                operate_H!(vk,vkp1,tvecs,pbits,nbits,jocc_p,jocc_n,SPEs,
+                           ppinfos,nninfos,tdims,
+                           jumps,to)
             end
-            talpha =  dot(vk,vkp1)
+            talpha = dot(vk,vkp1)
             Tmat[it,it] = talpha
             diagonalize_T!(it,num_ev,Tmat,en,num_history,TF,tol)
             #print_vec("En TR(d)L $it ",en[1])
@@ -47,16 +41,15 @@ function TRL(vks,uks,Tmat,k,
             Tmat[it+1,it] = tbeta; Tmat[it,it+1] = tbeta
             if doubleLanczos
                 if tbeta < Jtol;TF[1]=true;elit=it;break;end
-
                 @timeit to "JJ lanczos" begin
-                    for i =2:length(Jvs);Jvs[i] .=0.0;end
-                    Jmat .= 0.0;JTF[1] = false
+                    for i =2:lnJ;Jvs[i].=0.0;end; Jmat .= 0.0;JTF[1] = false
                     Jvs[1] .= vkp1
                     Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
                              pbits,nbits,tdims,eval_jj,
-                             Jidxs,oPP,oNN,oPNu,oPNd,beta_J,to)
+                             Jidxs,oPP,oNN,oPNu,oPNd,to)
                     vkp1 .= Jvs[1]                            
                     if TF[1];elit=it;break;end
+                    for i=1:nthreads();Jvs[i] .= 0.0;end#clean for Hlanczos
                 end
             end
         end
@@ -70,9 +63,99 @@ function TRL(vks,uks,Tmat,k,
     return elit
 end
 
+function operate_H!(wf,twf,tvecs,                   
+                    pbits,nbits,jocc_p,jocc_n,
+                    SPEs,ppinfos,nninfos,tdims,
+                    jumps,to)
+    @timeit to "pn operatetion" begin
+    @inbounds @threads for tmp in jumps
+        ttwf = tvecs[threadid()]
+        V= tmp.V; pjs = tmp.pjump; njs = tmp.njump           
+        @inbounds for ith = 1:length(pjs)
+            pj = pjs[ith]
+            Npi = pj.Ni; Npf = pj.Nf; phase_p=pj.phase
+            tMi = pj.ofsti; tMf = pj.ofstf; biEQbf = pj.bieqbf
+            @inbounds for nj in njs
+                Nni = nj.Ni; Nnf = nj.Nf; phase_n=nj.phase
+                Mi = tMi + Nni; Mf = tMf + Nnf
+                Vfac = ifelse(phase_p!=phase_n,-V,V)
+                ttwf[Mi] += Vfac .* wf[Mf]
+                if biEQbf;continue;end
+                ttwf[Mf] += Vfac .* wf[Mi]
+            end
+        end
+    end
+    end
+    @timeit to "clear" begin
+    @inbounds for i=1:nthreads()
+        axpy!(1.0,tvecs[i],twf)
+        tvecs[i] .= 0.0
+    end
+    end
+
+    @timeit to "pp/nn/1b" begin
+    lblock = length(pbits)    
+    @inbounds @threads for bi=1:lblock
+        idim = tdims[bi]
+        l_Np = length(pbits[bi])
+        l_Nn = length(nbits[bi])
+        offset = idim -l_Nn
+        ### pp/nn interaction
+        @inbounds for tinfo in ppinfos[bi]
+            tMi = tinfo.ofsti;tMf= tinfo.ofstf
+            Npi = tinfo.Ni; Npf=tinfo.Nf
+            fac = tinfo.coef
+            @inbounds @simd for nidx = 1:l_Nn
+                Mi = tMi + nidx; Mf = tMf + nidx
+                twf[Mf] += fac .* wf[Mi]
+                twf[Mi] += fac .* wf[Mf]
+            end
+        end
+        @inbounds for tinfo in nninfos[bi]
+            Nni = tinfo.Ni; Nnf=tinfo.Nf
+            tMi = idim - l_Nn + Nni
+            tMf = idim - l_Nn + Nnf
+            fac = tinfo.coef
+            @inbounds @simd for pidx = 1:l_Np
+                Mi = tMi + pidx*l_Nn; Mf = tMf + pidx*l_Nn
+                twf[Mf] += fac .* wf[Mi]
+                twf[Mi] += fac .* wf[Mf]
+            end
+        end
+        ### one-body operator
+        @inbounds for pidx = 1:l_Np
+            tMi = offset + pidx*l_Nn
+            @inbounds for nidx =1:l_Nn
+                Mi = tMi + nidx
+                twf[Mi] += (dot(SPEs[1],jocc_p[bi][pidx])+
+                            dot(SPEs[2],jocc_n[bi][nidx])) .* wf[Mi]
+            end
+        end
+    end
+    end
+    return nothing
+end
+
+function diagonalize_T!(k::Int64,num_ev::Int64,
+                        Tmat,
+                        en::Array{Array{Float64,1}},
+                        num_history::Int64,
+                        TF::Array{Bool,1},
+                        tol::Float64) where{FA<:Array{Float64,1},
+                                            FA2<:Array{Float64,2}}
+    for ith = num_history:-1:2
+        en[ith] .= en[ith-1]
+    end
+    n = minimum([num_ev,k])
+    @views en[1][1:n] .= eigvals(@views Tmat[1:k,1:k] )[1:n]
+    if all( en[2]-en[1] .< tol) ; TF[1]=true; end
+    return nothing
+end
+
+
 function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
                   pbits,nbits,tdims,eval_jj,
-                  Jidxs,oPP,oNN,oPNu,oPNd,beta_J,to)
+                  Jidxs,oPP,oNN,oPNu,oPNd,to)
     mdim = tdims[end]                 
     lnJ = length(Jvs)
     eljit=1; k = 1; inow=k
@@ -80,8 +163,7 @@ function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
         for it = k:lnJ-1
             inow = it
             vk = Jvs[it]; vkp1 = Jvs[it+1]
-            operate_J!(vk,vkp1,pbits,nbits,tdims,
-                       Jidxs,oPP,oNN,oPNu,oPNd,beta_J)
+            operate_J!(vk,vkp1,pbits,nbits,tdims,Jidxs,oPP,oNN,oPNu,oPNd)
             axpy!(eval_jj,vk,vkp1)## vkp1 .+= eval_jj .* vk  
             Jmat[it,it] = dot(vk,vkp1)
             teval = eigvals(@views Jmat[1:it,1:it])[1]
@@ -107,138 +189,11 @@ function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
     return nothing
 end
 
-function operate_H!(wf,twf,
-                    pbits,nbits,
-                    jocc_p,jocc_n,
-                    SPEs,ppinfo,nninfo,
-                    tdims,bis,bfs,block_tasks,
-                    p_NiNfs,n_NiNfs,Vpn,
-                    Mps,delMs,
-                    to=nothing) 
-    #lblock = length(pbits)
-    #@inbounds @qthreads for bi=1:lblock
-    @inbounds @threads for bi in block_tasks
-        if bi==0; continue;end #empty job
-        ret = [0,0,0]; ret2 = [0,0,0]
-        idim = tdims[bi]
-        l_Np = length(pbits[bi])
-        l_Nn = length(nbits[bi])
-        offset = idim -l_Nn
-
-        #@timeit to "pn1" begin
-        @inbounds for (bfidx,bf) in enumerate(bfs[bi])
-            bisearch!(delMs,Mps[bf]-Mps[bi],ret) #!! bf = bfs[bi][j]
-            Vs = Vpn[ret[1]]
-            fdim = tdims[bf]
-            l_Nn_f = length(nbits[bf])
-            p_NiNf = p_NiNfs[bi][bfidx]
-            n_NiNf = n_NiNfs[bi][bfidx]
-            off_f = fdim-l_Nn_f
-            @inbounds for (nth,V) in enumerate(Vs)
-                Npifs = p_NiNf[nth]; Nnifs = n_NiNf[nth]
-                @inbounds for Npif in Npifs
-                    tMi = offset+ Npif.i .* l_Nn
-                    tMf = off_f + Npif.f .* l_Nn_f
-                    phase_p = Npif.phase
-                    @inbounds for Nnif in Nnifs
-                        Mi = tMi + Nnif.i; Mf = tMf + Nnif.f
-                        phase_n = Nnif.phase
-                        twf[Mi] += ifelse(phase_p!=phase_n,-V,V) .* wf[Mf]
-                    end
-                end
-            end
-        end
-        #end
-        #@timeit to "pn2" begin
-        @inbounds for j = 1:length(bis[bi])-1    #### tbf = bi !!!
-            tbi = bis[bi][j]
-            bisearch!(delMs,Mps[bi]-Mps[tbi],ret)
-            bisearch_ord!(bfs[tbi],bi,ret2)
-            fdim=tdims[tbi]
-            l_Nn_i=length(nbits[tbi])
-            p_NiNf = p_NiNfs[tbi][ret2[1]]
-            n_NiNf = n_NiNfs[tbi][ret2[1]]
-            off_f = fdim - l_Nn_i
-            @inbounds for (nth,V) in enumerate(Vpn[ret[1]])
-                Npifs = p_NiNf[nth]
-                Nnifs = n_NiNf[nth]
-                @inbounds for Npif in Npifs
-                    tMi = off_f  + Npif.i *l_Nn_i #idim <-> fdim
-                    tMf = offset + Npif.f*l_Nn
-                    phase_p = Npif.phase
-                    @inbounds for Nnif in Nnifs
-                        Mi = tMi + Nnif.i; Mf = tMf + Nnif.f
-                        phase_n = Nnif.phase
-                        twf[Mf] += ifelse(phase_p!=phase_n,-V,V) .* wf[Mi]
-                    end
-                end
-            end
-        end
-        #end
-        #@timeit to "pp/nn" begin
-        ### pp/nn interaction
-        @inbounds for (Npi,tinfo) in enumerate(ppinfo[bi])
-            tMi = offset + Npi*l_Nn
-            @inbounds for (jj,tmp) in enumerate(tinfo)
-                tMf = offset + l_Nn*tmp.f
-                fac = tmp.coef
-                @inbounds @simd for nidx = 1:l_Nn
-                    Mi = tMi + nidx; Mf = tMf + nidx
-                    twf[Mf] += fac .* wf[Mi]
-                    twf[Mi] += fac .* wf[Mf]
-                end
-            end
-        end
-        @inbounds for (Nni,tinfo) in enumerate(nninfo[bi])
-            tMi = offset + Nni
-            @inbounds for (jj,tmp) in enumerate(tinfo)
-                tMf = offset + tmp.f
-                fac = tmp.coef
-                @inbounds @simd for pidx = 1:l_Np
-                    Mi = tMi + pidx*l_Nn; Mf = tMf + pidx*l_Nn
-                    twf[Mf] += fac .* wf[Mi]
-                    twf[Mi] += fac .* wf[Mf]
-                end
-            end
-        end
-        #end
-        #@timeit to "1b" begin
-        ### one-body operator
-        @inbounds for pidx = 1:l_Np
-            tMi = offset + pidx*l_Nn
-            @inbounds for nidx =1:l_Nn
-                Mi = tMi + nidx
-                twf[Mi] += (dot(SPEs[1],jocc_p[bi][pidx])+
-                            dot(SPEs[2],jocc_n[bi][nidx])) .* wf[Mi]
-            end
-        end
-        #end
-    end
-    return nothing
-end
-
-function diagonalize_T!(k::Int64,num_ev::Int64,
-                        Tmat,
-                        en::Array{Array{Float64,1}},
-                        num_history::Int64,
-                        TF::Array{Bool,1},
-                        tol::Float64) where{FA<:Array{Float64,1},
-                                            FA2<:Array{Float64,2}}
-    for ith = num_history:-1:2
-        en[ith] .= en[ith-1]
-    end
-    n = minimum([num_ev,k])
-    @views en[1][1:n] .= eigvals(@views Tmat[1:k,1:k] )[1:n]
-    if all( en[2]-en[1] .< tol) ; TF[1]=true; end
-    return nothing
-end
-
 function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
-               ppinfo,nninfo,bis,bfs,block_tasks,
-               p_NiNfs,n_NiNfs,Mps,delMs,Vpn,tdims,
-               eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
-               num_ev,num_history,lm,ls_sub,en,tol,to,
-               doubleLanczos=false)    
+              ppinfos,nninfos,jumps,tdims,
+              eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+              num_ev,num_history,lm,ls_sub,en,tol,to,
+              doubleLanczos=false)
     ls = q*ls_sub   
     mdim = tdims[end]
     TF=[false]
@@ -249,7 +204,7 @@ function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
     R  = zeros(Float64,q,q)
     Beta_J = zeros(Float64,q,q)
 
-    lnJ = 20 # maximum([q*4,10])
+    lnJ= nthreads(); if doubleLanczos;lnJ = 20;end
     Jvs = [zeros(Float64,q,mdim) for i=1:lnJ]
     Jvret = [zeros(Float64,q,mdim) ]
     Jmat = zeros(Float64,lnJ*q,lnJ*q)
@@ -267,16 +222,17 @@ function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
             V = vks[1]
         end
     end
+    tvecs = @views Jvs[1:nthreads()]
     while TF[1]==false
         for it = itmin:itmax
             inow = it
             V  = vks[it]
             HV = vks[it+1]
             @timeit to "bl_operateH" begin
-                bl_operate_H!(q,V,HV,pbits,nbits,
-                              jocc_p,jocc_n,SPEs,ppinfo,nninfo,
-                              tdims,bis,bfs,block_tasks,
-                              p_NiNfs,n_NiNfs,Vpn,Mps,delMs,to)
+                for i=1:nthreads(); tvecs[i].= 0.0; end
+                bl_operate_H!(q,V,HV,tvecs,pbits,nbits,
+                              jocc_p,jocc_n,SPEs,ppinfos,nninfos,
+                              tdims,jumps,to)
             end            
             BLAS.gemm!('N','T',1.0,V,HV,0.0,R) ##mul!(R,V,HV')
             if issymmetric(R) == false
@@ -297,11 +253,11 @@ function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
                     println("Hbn norm $tnorm");TF[1]=true;elit=it;break
                 end            
                 @timeit to "JJ lanczos" begin
-                    for i=2:lnJ; Jvs[i] .= 0.0; end
-                    JTF[1] = false; Jmat .= 0.0;Jvs[1] .= HV
-                    Vt .= 0.0; R .= 0.0
+                    Jvs[1] .= HV ; for i=2:lnJ; Jvs[i] .= 0.0; end
+                    JTF[1] = false; Jmat .= 0.0;Vt .= 0.0; R .= 0.0
                     bl_JJ_Lanczos(q,Jvs,Jmat,Vt,R,Beta_J,JTF,Jtol,Jvret,pbits,nbits,
-                                  tdims,eval_jj,Jidxs,oPP,oNN,oPNu,oPNd,to,Beta_H,U,Mat)
+                                  tdims,eval_jj,Jidxs,oPP,oNN,oPNu,oPNd,to,
+                                  Beta_H,U,Mat)
                     HV .= Jvs[1]; Beta_J .=0.0
                 end
             end
@@ -332,118 +288,81 @@ function bl_ReORTH(q,it,mdim,vks,HV,Vt,R)
 end
 
 # wf:V, twf:HV
-function bl_operate_H!(q,wf,twf,pbits,nbits,jocc_p,jocc_n,
-                       SPEs,ppinfo,nninfo,tdims,bis,bfs,block_tasks,
-                       p_NiNfs,n_NiNfs,Vpn, Mps,delMs,to=nothing) 
-    #lblock = length(pbits)
-    #@inbounds @qthreads for bi=1:lblock
-    @inbounds @threads for bi in block_tasks
-        if bi==0; continue;end #empty job
-        ret = [0,0,0]; ret2 = [0,0,0]
+function bl_operate_H!(q,wf,twf,tvecs,pbits,nbits,jocc_p,jocc_n,
+                       SPEs,ppinfos,nninfos,tdims,jumps,to)
+    @inbounds @threads for tmp in jumps
+        ttwf = tvecs[threadid()]
+        V= tmp.V; pjs = tmp.pjump; njs = tmp.njump           
+        @inbounds for ith = 1:length(pjs)
+            pj = pjs[ith]
+            Npi = pj.Ni; Npf = pj.Nf; phase_p=pj.phase
+            tMi = pj.ofsti; tMf = pj.ofstf
+            biEQbf = pj.bieqbf
+            @inbounds for nj in njs
+                Nni = nj.Ni; Nnf = nj.Nf; phase_n=nj.phase
+                Mi = tMi + Nni; Mf = tMf + Nnf
+                Vfac = ifelse(phase_p!=phase_n,-V,V)
+                w_f = @views ttwf[:,Mi]
+                w_i = @views   wf[:,Mf]
+                @inbounds @simd for b=1:q
+                    w_f[b] += Vfac .* w_i[b]
+                end
+                if biEQbf;continue;end
+                w_f = @views ttwf[:,Mf]
+                w_i = @views   wf[:,Mi]
+                @inbounds @simd for b=1:q
+                    w_f[b] += Vfac .* w_i[b]
+                end
+            end
+        end
+    end
+    @inbounds for i=1:nthreads()
+        twf .+= tvecs[i]
+        tvecs[i] .= 0.0
+    end
+
+    lblock = length(pbits)
+    @inbounds @threads for bi=1:lblock
         idim = tdims[bi]
         l_Np = length(pbits[bi])
         l_Nn = length(nbits[bi])
         offset = idim -l_Nn
-        #@timeit to "pn1" begin
-        @inbounds for (bfidx,bf) in enumerate(bfs[bi])
-            bisearch!(delMs,Mps[bf]-Mps[bi],ret) #!! bf = bfs[bi][j]
-            Vs = Vpn[ret[1]]
-            fdim = tdims[bf]
-            l_Nn_f = length(nbits[bf])
-            p_NiNf = p_NiNfs[bi][bfidx]
-            n_NiNf = n_NiNfs[bi][bfidx]
-            off_f = fdim-l_Nn_f
-            @inbounds for (nth,V) in enumerate(Vs)
-                Npifs = p_NiNf[nth]; Nnifs = n_NiNf[nth]
-                @inbounds for Npif in Npifs
-                    tMi = offset+ Npif.i .* l_Nn
-                    tMf = off_f + Npif.f .* l_Nn_f
-                    phase_p = Npif.phase
-                    @inbounds for Nnif in Nnifs
-                        Mi = tMi + Nnif.i; Mf = tMf + Nnif.f
-                        phase_n = Nnif.phase
-                        coeff = ifelse(phase_p!=phase_n,-V,V)
-                        w_f = @views twf[:,Mi]
-                        w_i = @views  wf[:,Mf]
-                        @inbounds @simd for b=1:q
-                            w_f[b] += coeff .* w_i[b]
-                        end
-                    end
-                end
-            end
-        end
-        #end
-        #@timeit to "pn2" begin
-        @inbounds for j = 1:length(bis[bi])-1    #### tbf = bi !!!
-            tbi = bis[bi][j]
-            bisearch!(delMs,Mps[bi]-Mps[tbi],ret)
-            bisearch_ord!(bfs[tbi],bi,ret2)
-            fdim=tdims[tbi]
-            l_Nn_i=length(nbits[tbi])
-            p_NiNf = p_NiNfs[tbi][ret2[1]]
-            n_NiNf = n_NiNfs[tbi][ret2[1]]
-            off_f = fdim - l_Nn_i
-            @inbounds for (nth,V) in enumerate(Vpn[ret[1]])
-                Npifs = p_NiNf[nth]
-                Nnifs = n_NiNf[nth]
-                @inbounds for Npif in Npifs
-                    tMi = off_f  + Npif.i *l_Nn_i #idim <-> fdim
-                    tMf = offset + Npif.f*l_Nn
-                    phase_p = Npif.phase
-                    @inbounds for Nnif in Nnifs
-                        Mi = tMi + Nnif.i; Mf = tMf + Nnif.f
-                        phase_n = Nnif.phase
-                        coeff = ifelse(phase_p!=phase_n,-V,V)
-                        w_f = @views twf[:,Mf]
-                        w_i = @views  wf[:,Mi]
-                        @inbounds @simd for b=1:q
-                            w_f[b] += coeff .* w_i[b]
-                        end
-                    end
-                end
-            end
-        end
-        #end
-        #@timeit to "pp/nn" begin
         ### pp/nn interaction
-        @inbounds for (Npi,tinfo) in enumerate(ppinfo[bi])
-            tMi = offset + Npi*l_Nn
-            @inbounds for (jj,tmp) in enumerate(tinfo)
-                tMf = offset + l_Nn*tmp.f
-                fac = tmp.coef
-                @inbounds @simd for nidx = 1:l_Nn
-                    Mi = tMi + nidx; Mf = tMf + nidx
-                    w_f1 = @views twf[:,Mf]
-                    w_i1 = @views  wf[:,Mi]
-                    w_f2 = @views twf[:,Mi]                    
-                    w_i2 = @views  wf[:,Mf]                        
-                    @inbounds @simd for b=1:q
-                        w_f1[b] += fac .* w_i1[b]
-                        w_f2[b] += fac .* w_i2[b]
-                    end
+        @inbounds for tinfo in ppinfos[bi]
+            tMi = tinfo.ofsti;tMf= tinfo.ofstf
+            Npi = tinfo.Ni; Npf=tinfo.Nf
+            fac = tinfo.coef
+            @inbounds @simd for nidx = 1:l_Nn
+                Mi = tMi + nidx; Mf = tMf + nidx
+                #twf[Mf] += fac .* wf[Mi]
+                #twf[Mi] += fac .* wf[Mf]
+                w_f1 = @views twf[:,Mf]
+                w_i1 = @views  wf[:,Mi]
+                w_f2 = @views twf[:,Mi]                    
+                w_i2 = @views  wf[:,Mf]                        
+                @inbounds @simd for b=1:q
+                    w_f1[b] += fac .* w_i1[b]
+                    w_f2[b] += fac .* w_i2[b]
                 end
             end
         end
-        @inbounds for (Nni,tinfo) in enumerate(nninfo[bi])
-            tMi = offset + Nni
-            @inbounds for (jj,tmp) in enumerate(tinfo)
-                tMf = offset + tmp.f
-                fac = tmp.coef
-                @inbounds @simd for pidx = 1:l_Np
-                    Mi = tMi + pidx*l_Nn; Mf = tMf + pidx*l_Nn
-                    w_f1 = @views twf[:,Mf]
-                    w_i1 = @views  wf[:,Mi]
-                    w_f2 = @views twf[:,Mi]                    
-                    w_i2 = @views  wf[:,Mf]                        
-                    @inbounds @simd for b=1:q
-                        w_f1[b] += fac .* w_i1[b]
-                        w_f2[b] += fac .* w_i2[b]
-                    end
+        @inbounds for tinfo in nninfos[bi]
+            Nni = tinfo.Ni; Nnf=tinfo.Nf
+            tMi = idim - l_Nn + Nni
+            tMf = idim - l_Nn + Nnf
+            fac = tinfo.coef
+            @inbounds @simd for pidx = 1:l_Np
+                Mi = tMi + pidx*l_Nn; Mf = tMf + pidx*l_Nn                
+                w_f1 = @views twf[:,Mf]
+                w_i1 = @views  wf[:,Mi]
+                w_f2 = @views twf[:,Mi]                    
+                w_i2 = @views  wf[:,Mf]                        
+                @inbounds @simd for b=1:q
+                    w_f1[b] += fac .* w_i1[b]
+                    w_f2[b] += fac .* w_i2[b]
                 end
             end
         end
-        #end
-        #@timeit to "1b" begin
         ### one-body operator
         @inbounds for pidx = 1:l_Np
             tMi = offset + pidx*l_Nn
@@ -456,10 +375,8 @@ function bl_operate_H!(q,wf,twf,pbits,nbits,jocc_p,jocc_n,
                 @inbounds @simd for b=1:q
                     w_f[b] += coeff .* w_i[b]
                 end
-
             end
         end
-        #end
     end
     return nothing
 end
@@ -617,8 +534,7 @@ end
 function bl_operate_J!(q,Rvec,Jv,
                        pbits,nbits,tdims,
                        Jidxs,
-                       oPP,oNN,oPNu,oPNd,
-                       beta_J=1.0)
+                       oPP,oNN,oPNu,oPNd)
     lblock=length(pbits)
     @inbounds @threads for bi in Jidxs
         if bi==0;continue;end
@@ -629,7 +545,7 @@ function bl_operate_J!(q,Rvec,Jv,
         opNN = oNN[bi]
         offset = idim-lNn
         @inbounds for tmp in opPP
-            Npi =tmp.Mi; Npf=tmp.Mf; fac=tmp.fac .* beta_J
+            Npi =tmp.Mi; Npf=tmp.Mf; fac=tmp.fac
             tMi = offset + Npi*lNn
             tMf = offset + Npf*lNn
             @inbounds for nidx = 1:lNn
@@ -645,7 +561,7 @@ function bl_operate_J!(q,Rvec,Jv,
             end
         end
         @inbounds for tmp in opNN #nn
-            Nni =tmp.Mi; Nnf=tmp.Mf; fac=tmp.fac .* beta_J
+            Nni =tmp.Mi; Nnf=tmp.Mf; fac=tmp.fac
             tMi = offset + Nni
             tMf = offset + Nnf
             @inbounds for pidx = 1:lNp
@@ -671,7 +587,7 @@ function bl_operate_J!(q,Rvec,Jv,
         @inbounds for top in operator
             pj = top.pjump
             nj = top.njump
-            fac =top.fac .* beta_J
+            fac =top.fac 
             @inbounds for tmp_p in pj
                 phase_p=tmp_p.phase
                 tMi = off_i + tmp_p.i * l_Nn_i
@@ -699,7 +615,7 @@ function bl_operate_J!(q,Rvec,Jv,
         @inbounds for top in operator
             pj  = top.pjump
             nj  = top.njump
-            fac = top.fac .* beta_J
+            fac = top.fac 
             @inbounds for tmp_p in pj
                 phase_p=tmp_p.phase
                 tMi = off_i + tmp_p.i * l_Nn_i
