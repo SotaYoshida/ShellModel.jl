@@ -35,6 +35,5 @@ function run()
     @time main(sntf,target_nuc,num_ev,tJs;is_block=true,q=n_block,
                in_wf="./appwavs/"*target_nuc*"_usdb_j"*string(tJ)*".appwav")
 
-    @time main("./snts/gxpf1a.snt","Cr48",10,[];is_show=true)    
 end
 run()
