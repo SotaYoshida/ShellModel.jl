@@ -105,6 +105,5 @@ Any suggestions, feedbacks, and "Issues&Pull requests" are welcomed.
 
 ## How to cite  
 
-in prep.
-
+For now, [https://arxiv.org/abs/2105.08256](https://arxiv.org/abs/2105.08256)
 
