@@ -38,6 +38,17 @@ struct nid
     Nf::Int64
     phase::Bool
 end
+struct Jpid
+    ofsti::Int64
+    ofstf::Int64
+    fac::Float64
+end
+struct Jnid
+    Ni::Int64
+    Nf::Int64
+    fac::Float64
+end
+
 struct jump1b
     V::Float64
     pjump::Array{pid,1}
@@ -45,6 +56,8 @@ struct jump1b
 end
 
 struct Jpninfo
+    bi::Int64
+    up::Bool
     fac::Float64
     pjump::Array{ifph,1}
     njump::Array{ifph,1}
@@ -152,10 +165,10 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
 
     #println("jumps");for jump in jumps;println(jump);end;    return nothing
 
-    @timeit to "Jcalc." begin
-        oPP,oNN,oPNu,oPNd = prep_J(tdims,p_sps,n_sps,mstates_p,mstates_n,
-                                   pbits,nbits)
-        Js = [ 0.5*Mtot*(0.5*Mtot+1) for i = 1:num_ev]
+    @timeit to "prepJ" begin
+        oPP,oNN,oPN_p,oPN_n  = prep_J(tdims,p_sps,n_sps,
+                                      mstates_p,mstates_n,pbits,nbits)
+        Js = [ 0.5*Mtot*(0.5*Mtot+1.0) for i = 1:num_ev]
         Jtasks = zeros(Int64,lblock)
         for i = 1:lblock
             Jtasks[i] = length(pbits[i])*length(nbits[i])
@@ -193,15 +206,15 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
             elit = TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
                         ppinfos,nninfos,
                         jumps,tdims,
-                        eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
-                        num_ev,num_history,lm,ls_sub,en,tol,to,doubleLanczos)            
+                        eval_jj,oPP,oNN,oPN_p,oPN_n,Jidxs,
+                        num_ev,num_history,lm,ls_sub,en,tol,to,doubleLanczos) 
         else #Thick Restart (double) Lanczos: TRL
             vks = [ zeros(Float64,mdim) for i=1:lm]
             uks = [ zeros(Float64,mdim) for i=1:ls]                
             initialize_wf(vks[1],"rand",tJ,mdim)
             elit = TRL(vks,uks,Tmat,itmin,pbits,nbits,jocc_p,jocc_n,
                        SPEs,ppinfos,nninfos,jumps,
-                       eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+                       eval_jj,oPP,oNN,oPN_p,oPN_n,Jidxs,
                        tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos)
         end
     end
@@ -236,14 +249,20 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
         end
     end   
     vt = zeros(Float64,mdim)
+    tvs = @views vks[1:nthreads()]
+    if is_block; vks = nothing;
+        tvs = [zeros(Float64,mdim) for i=1:nthreads()]
+    end
+          
+    #if is_block; tvs = @views vks[1,1:nthreads()];end
     for (nth,Rv) in enumerate(Rvecs)
         vt .= 0.0
-        operate_J!(Rv,vt,pbits,nbits,tdims,
-                   Jidxs,oPP,oNN,oPNu,oPNd)
+        for i=1:nthreads(); tvs[i] .= 0.0; end
+        operate_J!(Rv,vt,tvs,pbits,nbits,tdims,
+                   Jidxs,oPP,oNN,oPN_p,oPN_n)
         Js[nth] += dot(Rv,vt)
     end
     totJs = J_from_JJ1.(Js)
-    #println("totJs $totJs")
     tx_mom =""
     if calc_moment 
         tx_mom = eval_moment(Mtot,Rvecs,totJs,p_sps,n_sps,
@@ -984,6 +1003,14 @@ end
 function func_j(j1::I,j2::I,m1::I,m2::I) where{I<:Int64}
     sqrt( (0.5*j1*(0.5*j1+1.0)-0.5*m1*(0.5*m1-1.0))*(0.5*j2*(0.5*j2+1.0)-0.5*m2*(0.5*m2+1.0)) )
 end
+function func_j1(j::I,m::I,up=true) where{I<:Int64}
+    if up
+        return sqrt( (0.5*j*(0.5*j+1.0)-0.5*m*(0.5*m+1.0)))
+    else
+        return sqrt( (0.5*j*(0.5*j+1.0)-0.5*m*(0.5*m-1.0)))
+    end
+end
+
 
 function J_from_JJ1(JJ,tol=1.e-4)
     for J = 0:100 ## ad hoc J<=50
@@ -1389,7 +1416,10 @@ function JT1(bi,oPP,oNN,
     oPP[bi] = op_p; oNN[bi] = op_n
     return nothing
 end
+"""
+    prep_J
 
+"""
 function prep_J(tdims,p_sps,n_sps,
                 mstates_p::Array{Array{Int64,1},1},
                 mstates_n::Array{Array{Int64,1},1},
@@ -1405,127 +1435,73 @@ function prep_J(tdims,p_sps,n_sps,
         JT1(bi,oPP,oNN,p_sps,n_sps,
             mstates_p,mstates_n,pbits,nbits,tdims)
     end
-    oPNu = [ Jpninfo[]  for i =1:lblock]
-    oPNd = [ Jpninfo[]  for i =1:lblock]
-    #end
-    #@timeit to "pn" begin
-    vec_p_ani = [false for i = 1:lp]; vec_p_cre = [false for i = 1:lp]
-    vec_n_ani = [false for i = 1:ln]; vec_n_cre = [false for i = 1:ln]
-    ret_a = [-1,-1];ret_b = [-1,-1]
-    ret_c = [-1,-1];ret_d = [-1,-1]
-    birange = [1:lblock-1,2:lblock]
-    for pidx = 1:length(p_sps)
-        jp = p_sps[pidx][3]
-        mp_range = [-jp:2:jp-2,-jp+2:2:jp]
-        for nidx = 1:length(n_sps)
-            jn = n_sps[nidx][3]
-            mn_range = [-jn+2:2:jn,-jn:2:jn-2]
-            for ud = 1:2 # up:1 down:2
-                @inbounds for mp in mp_range[ud]
-                    @inbounds for mn in mn_range[ud]
-                        fac = 1.0
-                        if ud == 1
-                            fac = func_j(jn,jp,mn,mp)
-                        else
-                            fac = func_j(jp,jn,mp,mn)
-                        end
-                        if fac==0.0;continue;end
-                        vec_p_ani .= false; vec_p_cre .= false
-                        vec_n_ani .= false; vec_n_cre .= false
-                        if ud == 2  ### for pn down
-                            @inbounds for k = 2:lp
-                                if mstates_p[k][1] != p_sps[pidx][1];continue;end
-                                if mstates_p[k][2] != p_sps[pidx][2];continue;end
-                                if mstates_p[k][3] != p_sps[pidx][3];continue;end
-                                if mstates_p[k][4] != p_sps[pidx][4];continue;end
-                                if mstates_p[k][5] == mp
-                                    vec_p_ani[k] = true; vec_p_cre[k-1] = true
-                                    break
-                                end
-                            end
-                            @inbounds for k = 1:ln-1
-                                if mstates_n[k][1] != n_sps[nidx][1];continue;end
-                                if mstates_n[k][2] != n_sps[nidx][2];continue;end
-                                if mstates_n[k][3] != n_sps[nidx][3];continue;end
-                                if mstates_n[k][4] != n_sps[nidx][4];continue;end
-                                if mstates_n[k][5] == mn
-                                    vec_n_ani[k] = true; vec_n_cre[k+1] = true
-                                    break
-                                end
-                            end
-                        else  ### for p up n down
-                            @inbounds for k = 1:lp-1
-                                if mstates_p[k][1] != p_sps[pidx][1];continue;end
-                                if mstates_p[k][2] != p_sps[pidx][2];continue;end
-                                if mstates_p[k][3] != p_sps[pidx][3];continue;end
-                                if mstates_p[k][4] != p_sps[pidx][4];continue;end
-                                if mstates_p[k][5] == mp
-                                    vec_p_ani[k] = true;vec_p_cre[k+1] = true;break
-                                end
-                            end
-                            @inbounds for k = 2:ln
-                                if mstates_n[k][1] != n_sps[nidx][1];continue;end
-                                if mstates_n[k][2] != n_sps[nidx][2];continue;end
-                                if mstates_n[k][3] != n_sps[nidx][3];continue;end
-                                if mstates_n[k][4] != n_sps[nidx][4];continue;end
-                                if mstates_n[k][5] == mn
-                                    vec_n_ani[k] = true;vec_n_cre[k-1] = true;break
-                                end
-                            end
-                        end
-                        bitarr_to_int!(vec_p_ani,ret_c)
-                        bitarr_to_int!(vec_p_cre,ret_a)
-                        bitarr_to_int!(vec_n_ani,ret_d)
-                        bitarr_to_int!(vec_n_cre,ret_b)
 
-                        @inbounds @threads for bi in birange[ud]
-                            TF=[true]; ret_p=[0,0];ret_n=[0,0]
-                            ridx_p=[-1,-1,-1];ridx_n=[-1,-1,-1]
-                            bf = bi + Int64(2*(1.5-ud))
-                            pjump = ifph[]; njump=ifph[]
-                            for (Npi,pPhi) in enumerate(pbits[bi])
-                                TF_connectable_1(pPhi,ret_a[1],ret_c[1],TF)
-                                if TF[1]==false;continue;end
-                                calc_phase_1!(pPhi,ret_a[1],ret_c[1],ret_p)
-                                bisearch!(pbits[bf],ret_p[2],ridx_p)
-                                phase_p = ret_p[1]
-                                Npf= ridx_p[1]                                
-                                push!(pjump,ifph(Npi,Npf,phase_p==-1))
-                            end
-                            for (Nni,nPhi) in enumerate(nbits[bi])
-                                TF_connectable_1(nPhi,ret_b[1],ret_d[1],TF)
-                                if TF[1]==false;continue;end
-                                calc_phase_1!(nPhi,ret_b[1],ret_d[1],ret_n)
-                                bisearch!(nbits[bf],ret_n[2],ridx_n)
-                                phase_n = ret_n[1]
-                                Nnf= ridx_n[1]
-                                push!(njump,ifph(Nni,Nnf,phase_n==-1))
-                            end
-                            if length(pjump)*length(njump) == 0; continue;end
-                            if ud == 1
-                                push!(oPNu[bi],Jpninfo(fac,pjump,njump))
-                            else
-                                push!(oPNd[bi],Jpninfo(fac,pjump,njump))
-                            end
-                        end
-                    end
-                end
+    oPN_p = [ Jpid[] for bi=1:lblock-1 ]
+    oPN_n = [ Jnid[] for bi=1:lblock-1 ]
+    
+    @inbounds @threads for bi = 1:lblock-1
+        vec_p_ani = [false for i = 1:lp]; vec_p_cre = [false for i = 1:lp]
+        vec_n_ani = [false for i = 1:ln]; vec_n_cre = [false for i = 1:ln]
+        ret_a = [-1,-1];ret_b = [-1,-1];ret_c = [-1,-1];ret_d = [-1,-1]
+        toPN_p = oPN_p[bi];toPN_n = oPN_n[bi]
+        TF=[true]; ret_p=[0,0];ret_n=[0,0]
+        ## protons (m->m+1)
+        bf = bi + 1
+        for (Npi,pSD_i) in enumerate(pbits[bi])
+            for (Npf,pSD_f) in enumerate(pbits[bf])
+                dif = log2(abs(pSD_i-pSD_f))
+                try;Int64(dif);catch;continue;end
+                Iand = pSD_i & pSD_f
+                ani = pSD_i & ~Iand #bit of c^dag
+                cre = pSD_f & ~Iand #bit of c
+                kani = lp-Int(log2(ani))
+                kcre = lp-Int(log2(cre))
+                if mstates_p[kani][1] != mstates_p[kcre][1];continue;end #n
+                if mstates_p[kani][2] != mstates_p[kcre][2];continue;end #l
+                if mstates_p[kani][3] != mstates_p[kcre][3];continue;end #j
+                sp_j = mstates_p[kani][3]; sp_m = mstates_p[kani][5] 
+                vec_p_ani .= false; vec_p_cre .= false
+                vec_p_ani[kani] = true;vec_p_cre[kcre] = true
+                bitarr_to_int!(vec_p_ani,ret_c);bitarr_to_int!(vec_p_cre,ret_a)
+                calc_phase_1!(pSD_i,ret_a[1],ret_c[1],ret_p)
+                phase_p = ret_p[1]
+                ofsti=tdims[bi]+(Npi-1)*length(nbits[bi])
+                ofstf=tdims[bf]+(Npf-1)*length(nbits[bf])
+                fac = phase_p * func_j1(sp_j,sp_m,true)
+                push!(toPN_p,Jpid(ofsti,ofstf,fac))
+            end
+        end
+        ## neutrons (m->m-1)
+        for (Nni,nSD_i) in enumerate(nbits[bi])
+            for (Nnf,nSD_f) in enumerate(nbits[bf])
+                dif = log2(abs(nSD_i-nSD_f))
+                try;Int64(dif);catch;continue;end
+                Iand = nSD_i & nSD_f
+                ani = nSD_i & ~Iand; kani = ln-Int(log2(ani))
+                cre = nSD_f & ~Iand; kcre = ln-Int(log2(cre))
+                if mstates_n[kani][1] != mstates_n[kcre][1];continue;end #n
+                if mstates_n[kani][2] != mstates_n[kcre][2];continue;end #l
+                if mstates_n[kani][3] != mstates_n[kcre][3];continue;end #j
+                sp_j = mstates_n[kani][3]; sp_m = mstates_n[kani][5]
+                vec_n_ani .= false; vec_n_cre .= false
+                vec_n_ani[kani] = true;vec_n_cre[kcre] = true
+                bitarr_to_int!(vec_n_ani,ret_c);bitarr_to_int!(vec_n_cre,ret_a)
+                calc_phase_1!(nSD_i,ret_a[1],ret_c[1],ret_n)
+                phase_n = ret_n[1]
+                fac = phase_n * func_j1(sp_j,sp_m,false)
+                push!(toPN_n,Jnid(Nni,Nnf,fac))
             end
         end
     end
-    #end
-    #show(to, allocations = true,compact = false)
-    #println("")
-    return oPP,oNN,oPNu,oPNd
+    return oPP,oNN,oPN_p,oPN_n
 end
 
-function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
-                    oPP,oNN,oPNu,oPNd)
+function operate_J!(Rvec,Jv,tvs,
+                    pbits,nbits,tdims,Jidxs,
+                    oPP,oNN,oPN_p,oPN_n)    
     #to = TimerOutput()
     lblock=length(pbits)
-    #@timeit to "pp/nn " begin
-    @inbounds @threads for bi in Jidxs
-        if bi==0;continue;end
+    @inbounds @threads for bi = 1:lblock #in Jidxs
         idim = tdims[bi]
         lNn = length(nbits[bi])
         lNp = length(pbits[bi])
@@ -1552,60 +1528,25 @@ function operate_J!(Rvec,Jv,pbits,nbits,tdims,Jidxs,
                 Jv[Mi] += fac .* Rvec[Mf]
             end
         end
-    end
-    #end
-    #@timeit to "pn down" begin
-    @inbounds @threads for bi = 2:lblock
-        operator = oPNd[bi]
-        bf = bi-1
-        l_Nn_i = length(nbits[bi])
-        l_Nn_f = length(nbits[bf])
-        off_i = tdims[bi] - l_Nn_i
-        off_f = tdims[bf] - l_Nn_f
-        @inbounds for top in operator
-            pj = top.pjump
-            nj = top.njump
-            fac =top.fac
-            @inbounds for tmp_p in pj
-                phase_p=tmp_p.phase
-                tMi = off_i + tmp_p.i * l_Nn_i
-                tMf = off_f + tmp_p.f * l_Nn_f
-                @inbounds for tmp_n in nj
-                    phase_n=tmp_n.phase
-                    Mi = tMi + tmp_n.i
-                    Mf = tMf + tmp_n.f
-                    Jv[Mf] += ifelse(phase_p!=phase_n,-fac,fac) .* Rvec[Mi]
-                end
+        if bi==lblock;continue;end
+        tv = tvs[threadid()]
+        pj = @views oPN_p[bi]
+        nj = @views oPN_n[bi]
+        @inbounds for tpj in pj
+            tMi = tpj.ofsti; tMf = tpj.ofstf; fac_p = tpj.fac
+            @inbounds for tnj in nj               
+                Nni = tnj.Ni; Nnf =tnj.Nf; fac_n = tnj.fac
+                coeff = fac_p .* fac_n
+                Mi = tMi + Nni;Mf = tMf + Nnf
+                tv[Mf] += coeff .* Rvec[Mi]
+                tv[Mi] += coeff .* Rvec[Mf]
             end
         end
     end
-    @inbounds @threads for bi = 1:lblock-1
-        operator = oPNu[bi]
-        bf = bi+1
-        l_Nn_i = length(nbits[bi])
-        l_Nn_f = length(nbits[bf])
-        off_i = tdims[bi] - l_Nn_i
-        off_f = tdims[bf] - l_Nn_f
-        @inbounds for top in operator
-            pj  = top.pjump
-            nj  = top.njump
-            fac = top.fac 
-            @inbounds for tmp_p in pj
-                phase_p=tmp_p.phase
-                tMi = off_i + tmp_p.i * l_Nn_i
-                tMf = off_f + tmp_p.f * l_Nn_f
-                @inbounds for tmp_n in nj
-                    Nni = tmp_n.i; Nnf = tmp_n.f; phase_n=tmp_n.phase
-                    Mi = tMi + tmp_n.i
-                    Mf = tMf + tmp_n.f
-                    Jv[Mf] += ifelse(phase_p!=phase_n,-fac,fac) .* Rvec[Mi]
-                end
-            end
-        end
+    @inbounds for i= 1:nthreads()
+        Jv .+= tvs[i]
+        tvs[i] .= 0.0
     end
-    #end
-    #show(to, allocations = true,compact = false)
-    #println("")
     return nothing
 end
 

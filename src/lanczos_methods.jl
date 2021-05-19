@@ -1,24 +1,24 @@
 function TRL(vks,uks,Tmat,k,pbits,nbits,jocc_p,jocc_n,
              SPEs,ppinfos,nninfos,jumps,
-             eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+             eval_jj,oPP,oNN,oPN_p,oPN_n,Jidxs,
              tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos=false;
              Jtol = 1.e-6,JTF = [false])
     mdim = tdims[end]
     TF=[false]
     lnJ = nthreads(); if doubleLanczos;lnJ = maximum([lnJ,ls]);end
     Jvret = [zeros(Float64,1)];Jmat = zeros(Float64,1,1)
-    Jvs = [zeros(Float64,mdim) for i=1:lnJ]    
+    Jvs = [zeros(Float64,mdim) for i=1:lnJ]
+    tvecs = [zeros(Float64,mdim) for i=1:nthreads()]
     if doubleLanczos
         Jvret = [zeros(Float64,mdim)]
         Jmat = zeros(Float64,lnJ,lnJ)
         Jvs[1] .= vks[1]
-        Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,pbits,nbits,tdims,eval_jj,
-                 Jidxs,oPP,oNN,oPNu,oPNd,to)
+        Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,tvecs,pbits,nbits,tdims,eval_jj,
+                 Jidxs,oPP,oNN,oPN_p,oPN_n,to)
         vks[1] .= Jvs[1]
         for i=1:lnJ;Jvs[i] .=0.0;end
     end
     elit = 1
-    tvecs = @views Jvs[1:nthreads()]
     while TF[1]==false
         for it = k:lm-1
             vk =vks[it]; vkp1 =vks[it+1]
@@ -42,14 +42,13 @@ function TRL(vks,uks,Tmat,k,pbits,nbits,jocc_p,jocc_n,
             if doubleLanczos
                 if tbeta < Jtol;TF[1]=true;elit=it;break;end
                 @timeit to "JJ lanczos" begin
-                    for i =2:lnJ;Jvs[i].=0.0;end; Jmat .= 0.0;JTF[1] = false
+                    Jmat .= 0.0; JTF[1] = false
                     Jvs[1] .= vkp1
-                    Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
+                    Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,tvecs,
                              pbits,nbits,tdims,eval_jj,
-                             Jidxs,oPP,oNN,oPNu,oPNd,to)
-                    vkp1 .= Jvs[1]                            
+                             Jidxs,oPP,oNN,oPN_p,oPN_n,to)
+                    vkp1 .= Jvs[1]
                     if TF[1];elit=it;break;end
-                    for i=1:nthreads();Jvs[i] .= 0.0;end#clean for Hlanczos
                 end
             end
         end
@@ -67,7 +66,7 @@ function operate_H!(wf,twf,tvecs,
                     pbits,nbits,jocc_p,jocc_n,
                     SPEs,ppinfos,nninfos,tdims,
                     jumps,to)
-    @timeit to "pn operatetion" begin
+    #@timeit to "pn operatetion" begin
     @inbounds @threads for tmp in jumps
         ttwf = tvecs[threadid()]
         V= tmp.V; pjs = tmp.pjump; njs = tmp.njump           
@@ -85,15 +84,14 @@ function operate_H!(wf,twf,tvecs,
             end
         end
     end
-    end
-    @timeit to "clear" begin
+    #end
+    #@timeit to "clear" begin
     @inbounds for i=1:nthreads()
         axpy!(1.0,tvecs[i],twf)
         tvecs[i] .= 0.0
     end
-    end
 
-    @timeit to "pp/nn/1b" begin
+    #@timeit to "pp/nn/1b" begin
     lblock = length(pbits)    
     @inbounds @threads for bi=1:lblock
         idim = tdims[bi]
@@ -132,7 +130,7 @@ function operate_H!(wf,twf,tvecs,
             end
         end
     end
-    end
+    #end
     return nothing
 end
 
@@ -153,17 +151,17 @@ function diagonalize_T!(k::Int64,num_ev::Int64,
 end
 
 
-function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
+function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,tvecs,
                   pbits,nbits,tdims,eval_jj,
-                  Jidxs,oPP,oNN,oPNu,oPNd,to)
+                  Jidxs,oPP,oNN,oPN_p,oPN_n,to)
     mdim = tdims[end]                 
     lnJ = length(Jvs)
     eljit=1; k = 1; inow=k
     while JTF[1] == false
         for it = k:lnJ-1
             inow = it
-            vk = Jvs[it]; vkp1 = Jvs[it+1]
-            operate_J!(vk,vkp1,pbits,nbits,tdims,Jidxs,oPP,oNN,oPNu,oPNd)
+            vk = Jvs[it]; vkp1 = Jvs[it+1];vkp1 .= 0.0
+            operate_J!(vk,vkp1,tvecs,pbits,nbits,tdims,Jidxs,oPP,oNN,oPN_p,oPN_n)
             axpy!(eval_jj,vk,vkp1)## vkp1 .+= eval_jj .* vk  
             Jmat[it,it] = dot(vk,vkp1)
             teval = eigvals(@views Jmat[1:it,1:it])[1]
@@ -171,7 +169,8 @@ function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
                 eljit=it;JTF[1] = true;break                
             end
             if JTF[1];eljit=it;break;end
-            ReORTH(it,vkp1,Jvs)
+            s_Jvs = @views Jvs[1:it-1]
+            ReORTH(it,vkp1,s_Jvs)
             beta = sqrt(dot(vkp1,vkp1))
             if beta < 1.e-4;eljit=it;TF[1]=true;JTF[1]=true;break;end
             vkp1 .*= 1.0/beta
@@ -184,14 +183,15 @@ function Jlanczos(Jvs,Jmat,TF,JTF,Jtol,Jvret,
         end
     end
     if inow > k
-        ThickRestart_J(Jvs,Jvret,Jmat,eljit+1,1,eval_jj,Jtol)
+       ThickRestart_J(Jvs,Jvret,Jmat,eljit+1,1,eval_jj,Jtol)
     end
+    
     return nothing
 end
 
 function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
               ppinfos,nninfos,jumps,tdims,
-              eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+              eval_jj,oPP,oNN,oPN,Jidxs,
               num_ev,num_history,lm,ls_sub,en,tol,to,
               doubleLanczos=false)
     ls = q*ls_sub   
@@ -211,18 +211,19 @@ function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
     JTF = [false];Jtol=1.e-6
     U = zeros(Float64,mdim,lnJ*q)
     Mat = zeros(Float64,mdim,q)
+    tvecs = [zeros(Float64,q,mdim) for i=1:nthreads()]
     if doubleLanczos
         @timeit to "JJ lanczos" begin
             Jvs[1] .= vks[1]
-            bl_JJ_Lanczos(q,Jvs,Jmat,Vt,R,Beta_J,JTF,Jtol,Jvret,
+            bl_JJ_Lanczos(q,Jvs,Jmat,Vt,tvecs,
+                          R,Beta_J,JTF,Jtol,Jvret,
                           pbits,nbits,tdims,eval_jj,
-                          Jidxs,oPP,oNN,oPNu,oPNd,to,Beta_H,U,Mat)
+                          Jidxs,oPP,oNN,oPN,to,Beta_H,U,Mat)
             vks[1] .= Jvs[1];Beta_J .= 0.0;JTF[1]=false
             for i=1:lnJ;Jvs[i] .= 0.0;end
             V = vks[1]
         end
     end
-    tvecs = @views Jvs[1:nthreads()]
     while TF[1]==false
         for it = itmin:itmax
             inow = it
@@ -255,8 +256,9 @@ function TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
                 @timeit to "JJ lanczos" begin
                     Jvs[1] .= HV ; for i=2:lnJ; Jvs[i] .= 0.0; end
                     JTF[1] = false; Jmat .= 0.0;Vt .= 0.0; R .= 0.0
-                    bl_JJ_Lanczos(q,Jvs,Jmat,Vt,R,Beta_J,JTF,Jtol,Jvret,pbits,nbits,
-                                  tdims,eval_jj,Jidxs,oPP,oNN,oPNu,oPNd,to,
+                    bl_JJ_Lanczos(q,Jvs,Jmat,Vt,tvecs,
+                                  R,Beta_J,JTF,Jtol,Jvret,pbits,nbits,
+                                  tdims,eval_jj,Jidxs,oPP,oNN,oPN,to,
                                   Beta_H,U,Mat)
                     HV .= Jvs[1]; Beta_J .=0.0
                 end
@@ -472,20 +474,22 @@ function bl_ThickRestart(q,vks,uks,R,Tmat,inow,ls_sub,mdim,Vt)
     return nothing
 end
 
-function bl_JJ_Lanczos(q,Jvs,Jmat,Vt,R,Beta_J,JTF,Jtol,Jvret,
+function bl_JJ_Lanczos(q,Jvs,Jmat,Vt,tvecs,R,Beta_J,JTF,Jtol,Jvret,
                        pbits,nbits,tdims,eval_jj,
-                       Jidxs,oPP,oNN,oPNu,oPNd,to,bnout,
+                       Jidxs,oPP,oNN,oPN,to,bnout,
                        U,Mat;verbose=false)
     mdim = tdims[end]                 
     lnJ = length(Jvs)
     itmin = 1;itmax = lnJ-1; inow = 0
     rescount = 0
+    lPN = length(oPN)
     while JTF[1] == false
         for it = itmin:itmax
             inow = it            
             V = Jvs[it]; JV = Jvs[it+1]
-            bl_operate_J!(q,V,JV,pbits,nbits,tdims,
-                          Jidxs,oPP,oNN,oPNu,oPNd)
+            bl_operate_J!(q,V,JV,tvecs,
+                          pbits,nbits,tdims,
+                          Jidxs,oPP,oNN,oPN,lPN,to)
             axpy!(eval_jj,V,JV)##JV .+= eval_jj .* V            
             BLAS.gemm!('N','T',1.0,V,JV,0.0,R)
             @inbounds for j=1:q;for i=1:j
@@ -531,11 +535,12 @@ function bl_JJ_Lanczos(q,Jvs,Jmat,Vt,R,Beta_J,JTF,Jtol,Jvret,
     return nothing
 end
 
-function bl_operate_J!(q,Rvec,Jv,
+function bl_operate_J!(q,Rvec,Jv,tvecs,
                        pbits,nbits,tdims,
                        Jidxs,
-                       oPP,oNN,oPNu,oPNd)
-    lblock=length(pbits)
+                       oPP,oNN,oPN,lPN,to)
+    #lblock=length(pbits)
+    #@timeit to "pp/nn" begin
     @inbounds @threads for bi in Jidxs
         if bi==0;continue;end
         idim = tdims[bi]
@@ -577,61 +582,42 @@ function bl_operate_J!(q,Rvec,Jv,
             end
         end
     end
-    @inbounds @threads for bi = 2:lblock
-        operator = oPNd[bi]
-        bf = bi-1
-        l_Nn_i = length(nbits[bi])
-        l_Nn_f = length(nbits[bf])
-        off_i = tdims[bi] - l_Nn_i
-        off_f = tdims[bf] - l_Nn_f
-        @inbounds for top in operator
-            pj = top.pjump
-            nj = top.njump
-            fac =top.fac 
-            @inbounds for tmp_p in pj
-                phase_p=tmp_p.phase
-                tMi = off_i + tmp_p.i * l_Nn_i
-                tMf = off_f + tmp_p.f * l_Nn_f
-                @inbounds for tmp_n in nj
-                    phase_n=tmp_n.phase
-                    Mi = tMi + tmp_n.i
-                    Mf = tMf + tmp_n.f
-                    coeff = ifelse(phase_p!=phase_n,-fac,fac)
-                    w_f = @views Jv[:,Mf]; w_i = @views Rvec[:,Mi]
-                    @inbounds @simd for b=1:q
-                        w_f[b] += coeff .* w_i[b]
-                    end
+    #end
+    #@timeit to "pn" begin
+    @inbounds @threads for ith = 1:lPN
+        top = oPN[ith]
+        tv = tvecs[threadid()]
+
+        bi = top.bi;updown = top.up;
+        pj = top.pjump; nj = top.njump;fac =top.fac
+        bf = bi + ifelse(updown,1,-1)
+
+        #l_Nn_i = length(nbits[bi])
+        #l_Nn_f = length(nbits[bf])
+        #off_i = tdims[bi] - l_Nn_i
+        #off_f = tdims[bf] - l_Nn_f
+        @inbounds for tmp_p in pj
+            phase_p=tmp_p.phase
+            tMi = tmp_p.i 
+            tMf = tmp_p.f 
+            @inbounds for tmp_n in nj
+                phase_n=tmp_n.phase
+                Mi = tMi + tmp_n.i
+                Mf = tMf + tmp_n.f
+                w_f = @views tv[:,Mf]
+                w_i = @views Rvec[:,Mi]
+                coeff = ifelse(phase_p!=phase_n,-fac,fac)
+                @inbounds @simd for b=1:q
+                    w_f[b] += coeff .* w_i[b]
                 end
             end
         end
     end
-    @inbounds @threads for bi = 1:lblock-1
-        operator = oPNu[bi]
-        bf = bi+1
-        l_Nn_i = length(nbits[bi])
-        l_Nn_f = length(nbits[bf])
-        off_i = tdims[bi] - l_Nn_i
-        off_f = tdims[bf] - l_Nn_f
-        @inbounds for top in operator
-            pj  = top.pjump
-            nj  = top.njump
-            fac = top.fac 
-            @inbounds for tmp_p in pj
-                phase_p=tmp_p.phase
-                tMi = off_i + tmp_p.i * l_Nn_i
-                tMf = off_f + tmp_p.f * l_Nn_f
-                @inbounds for tmp_n in nj
-                    Nni = tmp_n.i; Nnf = tmp_n.f; phase_n=tmp_n.phase
-                    Mi = tMi + tmp_n.i
-                    Mf = tMf + tmp_n.f
-                    coeff = ifelse(phase_p!=phase_n,-fac,fac)
-                    w_f = @views Jv[:,Mf]; w_i = @views Rvec[:,Mi]
-                    @inbounds @simd for b=1:q
-                        w_f[b] += coeff .* w_i[b]
-                    end
-                end
-            end
-        end
+    @inbounds for i= 1:nthreads()
+        Jv .+= tvecs[i]
+        tvecs[i] .= 0.0
     end
+    #end
+    
     return nothing
 end
