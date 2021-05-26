@@ -92,6 +92,7 @@ One can specify the number of execution threads like this.
 * compatibility to wavefunctions by other shell-model codes
 * J-scheme
 * other operators (Gamow-Teller, etc.)
+* DMRG
 * MPI parallerization for larger systems
 * and more...
 
