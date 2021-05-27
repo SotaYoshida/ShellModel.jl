@@ -339,9 +339,9 @@ function readsnt(sntf,Anum)
 end
 
 """
-    def_mstates(p_sps,n_sps)
+    def_mstate(p_sps, n_sps)
 
-to define the single particle states specified by m_z
+To define the single particle states specified by n,l,j,mz
 """
 function def_mstates(p_sps,n_sps)
     mstates_p = [[1]]; mstates_n = [[1]]; mz_p = Int64[]; mz_n = Int64[]
