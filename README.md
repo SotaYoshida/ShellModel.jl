@@ -83,7 +83,9 @@ One can specify the number of execution threads like this.
 * Eigenvector Continuation (To constuct approximate shell-model wave funcitons for a given effective interaction)
   as efficient emulator & preprocessing for the shell-model
  
-* To calculate mu & Q moments and M1, E2 transitions (April 2021 -)
+* Calc. mu & Q moments and M1, E2 transitions (April 2021 -)
+
+* Calc. entanglement entropy
 
 ## To be implemented:  
 
