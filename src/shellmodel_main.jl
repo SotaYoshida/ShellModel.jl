@@ -1145,7 +1145,7 @@ end
 To calculate entanglement entropy (not optimized yet).
 
 ```math
-S  = -\\mathrm{Tr} \\rho \\ln(\\rho)
+S  = -\\mathrm{Tr} \\rho \\log (\\rho)
 ```
 """
 function 
