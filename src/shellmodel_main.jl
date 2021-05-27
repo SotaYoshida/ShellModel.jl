@@ -100,7 +100,7 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
     if Anum % 2 != Mtot % 2; println("invalid targetJ $tJ");exit();end
     target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)
-    mstates_p, mstates_n,mz_p,mz_n = make_mstates(p_sps,n_sps)
+    mstates_p, mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
     pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
                                                   n_sps,mstates_n,mz_n,vn,Mtot)
     lblock=length(pbits)
@@ -339,11 +339,11 @@ function readsnt(sntf,Anum)
 end
 
 """
-   make_mstates(p_sps,n_sps)
+    def_mstates(p_sps,n_sps)
 
 to define the single particle states specified by m_z
 """
-function make_mstates(p_sps,n_sps)
+function def_mstates(p_sps,n_sps)
     mstates_p = [[1]]; mstates_n = [[1]]; mz_p = Int64[]; mz_n = Int64[]
     deleteat!(mstates_p,1); deleteat!(mstates_n,1)
     for (pidx,tsps) in enumerate(p_sps)

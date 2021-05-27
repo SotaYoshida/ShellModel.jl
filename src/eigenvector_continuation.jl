@@ -123,7 +123,7 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
     
     target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)
-    mstates_p,mstates_n,mz_p,mz_n = make_mstates(p_sps,n_sps)
+    mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
     pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
                                                   n_sps,mstates_n,mz_n,vn,Mtot)
     oPP,oNN,oPNu,oPNd = prep_J(tdims,p_sps,n_sps,mstates_p,mstates_n,
@@ -358,7 +358,7 @@ function solveEC(Hs,target_nuc,tJNs;
     end
     target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)  
-    mstates_p,mstates_n,mz_p,mz_n = make_mstates(p_sps,n_sps)
+    mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
     println("nuc: $target_el")
     exlines = ""
     try 
@@ -484,7 +484,7 @@ function solveEC_UQ(Hs,target_nuc,tJNs,Erefs,errors;
     end
     target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)  
-    mstates_p,mstates_n,mz_p,mz_n = make_mstates(p_sps,n_sps)
+    mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
     println("nuc: $target_nuc")
 
     Dims = Int64[]
