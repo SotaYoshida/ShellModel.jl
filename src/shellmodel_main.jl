@@ -77,6 +77,7 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
               num_history=3,lm=100,ls=20,tol=1.e-6,
               in_wf="",mdimmode=false,
               calc_moment = false,
+              calc_entropy = false,
               gfactors = [1.0,0.0,5.586,-3.826],
               effcharge=[1.5,0.5])
     to = TimerOutput()
@@ -197,20 +198,8 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
                 end
             end
             Rvec .*= 1.0/sqrt(dot(Rvec,Rvec))
-            # if false # <H> check
-            #     Hv .= 0.0
-            #     operate_H!(Rvecs[nth],Hv,
-            #                pbits,nbits,
-            #                jocc_p,jocc_n,SPEs,
-            #                ppinfo,nninfo,
-            #                tdims,bis,bfs,block_tasks,
-            #                p_NiNfs,n_NiNfs,Vpn,Mps,delMs,to)
-            #     if nth == 1; print("<v|H|v> ");end
-            #     print(" ", dot(Rvecs[nth],Hv))
-            #     if nth==num_ev;println("");end
-            # end
         end
-    end   
+    end
     vt = zeros(Float64,mdim)
     for (nth,Rv) in enumerate(Rvecs)
         vt .= 0.0
@@ -219,7 +208,11 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
         Js[nth] += dot(Rv,vt)
     end
     totJs = J_from_JJ1.(Js)
-    #println("totJs $totJs")
+    ### entanglement entropy 
+    if calc_entropy
+        entropy(Rvecs,pbits,nbits,tdims,to)
+    end
+    ### mu&Q-moment
     tx_mom =""
     if calc_moment 
         tx_mom = eval_moment(Mtot,Rvecs,totJs,p_sps,n_sps,
@@ -234,7 +227,7 @@ function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
             if tJ != -1;oupf="./"*target_nuc*"_"*csnt*"_j"*string(tJ)*".wav";end
             writeRitzvecs(mdim,Mtot,en[1],totJs,Rvecs,oupf)
         end
-    end
+    end    
     if is_show
         show(to, allocations = true,compact = true);println("")
     end
@@ -1144,6 +1137,51 @@ function writeRitzvecs(mdim,mtot,vals,totJs,Rvecs,oupf)
     end
     for nth = 1:num_ev; write(io,Rvecs[nth]); end
     close(io)
+end
+
+function entropy(Rvecs,pbits,nbits,tdims,to)
+    pdims = [0];for bi=1:length(pbits);push!(pdims,pdims[end]+length(pbits[bi]));end
+    ndims = [0];for bi=1:length(nbits);push!(ndims,ndims[end]+length(nbits[bi]));end
+    pdim = pdims[end]; ndim = ndims[end]
+    rho_p = zeros(Float64,pdim,pdim)
+    rho_n = zeros(Float64,ndim,ndim)
+    for (n,Rvec) in enumerate(Rvecs)
+        rho_p .= 0.0#; rho_n .= 0.0
+        for bi = 1:length(pbits)
+            idim = tdims[bi]
+            nbit = nbits[bi]
+            ln = length(nbit)
+            pofst = pdims[bi]
+            for (pid_i,pbit_i) in enumerate(pbits[bi])
+                tMi = idim + (pid_i-1)*ln
+                ri = pofst + pid_i
+                for (pid_j,pbit_j) in enumerate(pbits[bi])
+                    if pid_j <pid_i;continue;end
+                    tMj = idim + (pid_j-1)*ln
+                    rj = pofst + pid_j
+                    for nidx =1:ln
+                        Mi = tMi+nidx; Mj = tMj+nidx
+                        tmp = Rvec[Mi] .* Rvec[Mj]
+                        rho_p[ri,rj] += tmp
+                        if ri != rj;rho_p[rj,ri] += tmp;end
+                    end
+                end
+            end
+        end
+        s = -tr( rho_p * log(rho_p) )
+        println("n= $n entropy $s")
+    end
+    return nothing
+end
+
+function make_Hermite!(H,Dim)
+    @inbounds @simd for i = 1:Dim
+        for j=i+1:Dim
+            tmp = 0.5 * (H[i,j] + H[j,i])
+            H[i,j] = tmp; H[j,i]=tmp
+        end
+    end
+    return nothing
 end
 
 function make_distribute(num_task)
