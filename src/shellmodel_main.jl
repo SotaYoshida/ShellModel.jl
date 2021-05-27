@@ -69,6 +69,7 @@ Digonalize the model-space Hamiltonian
 - `in_wf=""`      path to initial w.f. (for preprocessing) 
 - `mdimmode=false`   `true` => calculate only the M-scheme dimension
 - `calc_moment=false`  `true` => calculate mu&Q moments 
+- `calc_entropy=false`  `true` => calculate entanglement entropy
 - `gfactors=[1.0,0.0,5.586,-3.826]` angular momentum and spin g-factors 
 - `effcgarge=[1.5,0.5]` effective charges 
 """
@@ -1138,8 +1139,16 @@ function writeRitzvecs(mdim,mtot,vals,totJs,Rvecs,oupf)
     for nth = 1:num_ev; write(io,Rvecs[nth]); end
     close(io)
 end
+"""
+    entropy(Rvecs,pbits,nbits,tdims,to)
 
-function entropy(Rvecs,pbits,nbits,tdims,to)
+To calculate entanglement entropy (not optimized yet).
+
+```math
+S  = -\\mathrm{Tr} \\rho \\ln(\\rho)
+```
+"""
+function 
     pdims = [0];for bi=1:length(pbits);push!(pdims,pdims[end]+length(pbits[bi]));end
     ndims = [0];for bi=1:length(nbits);push!(ndims,ndims[end]+length(nbits[bi]));end
     pdim = pdims[end]; ndim = ndims[end]
