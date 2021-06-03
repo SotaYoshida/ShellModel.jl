@@ -57,7 +57,7 @@ One can specify the number of execution threads like this.
 
 ## Documentation 
 
-[here](https://sotayoshida.github.io/ShellModel.jl/dev/)
+[Here](https://sotayoshida.github.io/ShellModel.jl/dev/)
 
 ## Features
 * Pros (Some are "Pros" of the Julia language though :D)
@@ -94,6 +94,7 @@ One can specify the number of execution threads like this.
 * compatibility to wavefunctions by other shell-model codes
 * J-scheme
 * other operators (Gamow-Teller, etc.)
+* spectroscopic factors
 * DMRG
 * MPI parallerization for larger systems
 * and more...
