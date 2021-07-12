@@ -310,7 +310,8 @@ function readsnt(sntf,Anum)
     TBMEs=[ Float64[] for i =1:3] #pp/nn/pn
     oTBMEs= Float64[]
     @inbounds for ith = 1:ntbme
-        i,j,k,l,totJ,TBME= rm_nan(split(lines[1+ln+lp+1+nsp+1+ith], " "))
+        tmp = rm_nan(split(lines[1+ln+lp+1+nsp+1+ith], " "))
+        i = tmp[1]; j = tmp[2]; k = tmp[3]; l =tmp[4]; totJ = tmp[5];  TBME= tmp[6]        
         i = parse(Int,i);j = parse(Int,j);k = parse(Int,k);l = parse(Int,l);
         nth = 0
         if i<=lp && j<=lp
