@@ -419,8 +419,12 @@ function solveEC(Hs,target_nuc,tJNs;
                 @timeit to "Gen. Eigen" begin
                     mul!(tMat,Linv,Hmat)
                     mul!(tildH,Linv',tMat)                                    
-                    vals,vecs = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
-                                                  tol=1.e-8, maxiter=300))
+                    #vals,vecs = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
+                    #                              tol=1.e-8, maxiter=300))
+                    valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
+                    vals = @views valsK[1:num_ev_target]
+                    #print_vec("vals ",vals)
+                    #print_vec("valsK",valsK)                    
                     if verbose;print_vec("En(EC)",vals);end
                 end                
                 push!(sumV,[sntf,tJ,vals])
@@ -729,9 +733,12 @@ function intMCMC(itnum_MCMC,burnin,var_M,iThetas,Theta,c_Theta,Vint,Vopt,
             end
             BLAS.gemm!('N','N',1.0,Linv,Hmat,0.0,tMat)
             BLAS.gemm!('T','N',1.0,Linv,tMat,0.0,tildH)
-
-            @timeit to "Arpack" vals = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
-                                                         tol=1.e-8, maxiter=300))[1]
+            #@timeit to "Arpack" vals = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
+            #                                             tol=1.e-8, maxiter=300))[1]
+            @timeit to "Krylovkit" begin
+                valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
+                vals = @views valsK[1:num_ev_target]
+            end
             nllh += L2_llh(vals,Erefs[jidx],errors[jidx])
             if itM > burnin
                 @timeit to "push" for i=1:num_ev_target
@@ -835,18 +842,14 @@ function intMCMC_PT(itnum_MCMC,burnin,var_M,Ts,
                 Eval = @views Evals[jidx]
                 BLAS.gemm!('N','N',1.0,Linv,Hmat,0.0,tMat)
                 BLAS.gemm!('T','N',1.0,Linv,tMat,0.0,tildH)                
-
-                #@timeit to "my_eigval" my_eigvals!(tildH,tMat,Dim,vks,en_s[jidx],
-                #                                   num_ev_target)                
-                #Evals[jidx] .= en_s[jidx][1]               
-                #println("En my ", Evals[jidx]) 
-
-                #@timeit to "Arpack" Evals[jidx] .= real.(
-                #    Arpack.eigs(tildH,nev=num_ev_target,
                 
-                @timeit to "Arpack" begin
-                    Eval .= Arpack.eigs(tildH,nev=num_ev_target,
-                                        which=:SR,tol=1.e-6,maxiter=150)[1]
+                #@timeit to "Arpack" begin
+                #    Eval .= Arpack.eigs(tildH,nev=num_ev_target,
+                #                        which=:SR,tol=1.e-6,maxiter=150)[1]
+                #end
+                @timeit to "Krylovkit" begin
+                    valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
+                    vals = @views valsK[1:num_ev_target]
                 end
                 #println("En Arpack ", Evals[jidx], "\n")
                 nllhs[ridx] += L2_llh(Eval,Erefs[jidx],errors[jidx];T=Ts[ridx])

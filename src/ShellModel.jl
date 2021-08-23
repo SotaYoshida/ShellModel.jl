@@ -1,9 +1,10 @@
 module ShellModel
 
-using Arpack
+#using Arpack
 using Base.Threads
 using Combinatorics
 using Distributions
+using KrylovKit
 using LaTeXStrings
 using LinearAlgebra
 using Printf
