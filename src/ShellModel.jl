@@ -1,6 +1,5 @@
 module ShellModel
 
-#using Arpack
 using Base.Threads
 using Combinatorics
 using Distributions
@@ -9,7 +8,6 @@ using LaTeXStrings
 using LinearAlgebra
 using Printf
 using Random
-using SIMD
 using StatsBase
 using TimerOutputs
 using WignerSymbols
