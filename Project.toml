@@ -18,6 +18,7 @@ WignerSymbols = "9f57e263-0b3d-5e2e-b1be-24f2bb48858b"
 [compat]
 Combinatorics = "1.0"
 Distributions = "0.24, 0.25"
+KrylovKit = "0.5"
 LaTeXStrings = "1.2"
 StatsBase = "0.33"
 TimerOutputs = "0.5"
