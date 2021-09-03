@@ -2,7 +2,7 @@ using Pkg
 
 ts = ["Combinatorics",
       "Distributions",
-      "KrylovKit ",
+      "KrylovKit",
       "LaTeXStrings",
       "LinearAlgebra",
       "Printf",
