@@ -17,7 +17,7 @@ ThreadPools = "b189fb0b-2eb5-4ed4-bc0c-d34c51242431"
 WignerSymbols = "9f57e263-0b3d-5e2e-b1be-24f2bb48858b"
 
 [compat]
-Arpack = "3.0"
+Arpack = "0.5"
 Combinatorics = "1.0"
 Distributions = "0.24, 0.25"
 LaTeXStrings = "1.2"
