@@ -742,10 +742,10 @@ function eval_moment(Mtot,Rvecs,totJs,
             Jf = Int(2*totJs[np])//2
             lam = 1
             omu = div(Mf-Mi,2)
-            sel = wigner3j(Jf,lam,Ji,-Mf,omu,Mi)
+            sel = wigner3j(Float64,Jf,lam,Ji,-Mf,omu,Mi)
             if sel != 0
                 signmu = (-1)^(Jf-Mf)
-                cg = wigner3j(Ji,lam,Jf,-Ji,omu,Jf) / sel
+                cg = wigner3j(Float64,Ji,lam,Jf,-Ji,omu,Jf) / sel
                 if np ==nth
                     gm = signmu * dot(twf1,wf) *cg  * c_mom_mu
                     tx *= "mu (n=$nth) " * @sprintf("%12.5f ",gm) *"\t"
@@ -758,10 +758,10 @@ function eval_moment(Mtot,Rvecs,totJs,
                 end
             end
             lam = 2
-            sel =  wigner3j(Jf,lam,Ji,-Mf,omu,Mi)
+            sel =  wigner3j(Float64,Jf,lam,Ji,-Mf,omu,Mi)
             if sel != 0
                 signQ = ( (-1)^(Jf-Mf))
-                cg = wigner3j(Ji,lam,Jf,-Ji,omu,Jf) / sel
+                cg = wigner3j(Float64,Ji,lam,Jf,-Ji,omu,Jf) / sel
                 if np == nth                        
                     Q = dot(twf2,wf) * cg * c_mom_Q * signQ
                     tx *= "Q (n=$nth) " * @sprintf("%12.5f ",Q)

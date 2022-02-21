@@ -1,12 +1,14 @@
 using Pkg
 
-ts = ["Combinatorics",
+ts = ["Arpack",
+      "Combinatorics",
       "Distributions",
-      "KrylovKit",
       "LaTeXStrings",
       "LinearAlgebra",
       "Printf",
+      "PyCall",
       "Random",
+      "SIMD",
       "StatsBase",
       "TimerOutputs",
       "WignerSymbols"]

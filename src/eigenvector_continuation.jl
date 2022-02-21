@@ -64,7 +64,7 @@ function read_wf_from_info(wfinfos,mdim,vs,wpath)
     ## e.g., ./wavsamples_sigma3/Mg24_sample_1.wav nth= 1 TDmatidx  1
     for tmp in wfinfos
         inpf,nth,TDidx = tmp
-        if wpath != "./"
+        if wpath != "./" && wpath != ""
             tn = split(inpf,"/")
             ln =length(tn)
             inpf = wpath*tn[ln-1]*"/"*tn[ln]
@@ -104,13 +104,17 @@ end
 function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
                 num_history=3,lm=100,ls=15,tol=1.e-9,q=1,
                 path_to_samplewav="",calc_moment=true,
-                save_wav = false,
+                save_wav = false,tdmatdir="./tdmat/",
+                truncation_params= [ ],
                 gfactors = [1.0,0.0,5.586,-3.826],
                 effcharge=[1.5,0.5])
     to = TimerOutput()
     sntf = Hs[1]    
     Anum = parse(Int64, match(reg,target_nuc).match)
-    lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
+    target_el = replace.(target_nuc, string(Anum)=>"")
+    Hamil,modelspace = readsnt(sntf,Anum,target_el)    
+    SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
+    p_sps = modelspace.psps; n_sps = modelspace.nsps
     hw, bpar = init_ho_by_mass(Anum,1) # mass formula 
     if 16<= Anum <= 40
         hw, bpar = init_ho_by_mass(Anum,2) # 2: mass formula for sd-shell
@@ -121,21 +125,24 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
     eval_jj = 0.5*tJ*(tJ/2+1)
     if Anum % 2 != Mtot % 2; println("invalid target J");exit();end
     
-    target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)
     mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
-    pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
-                                                  n_sps,mstates_n,mz_n,vn,Mtot)
+    Occ = occ(modelspace,Mtot,truncation_params)    
+    pbits = Occ.pbits; nbits = Occ.nbits; tdims = Occ.tdims
+    jocc_p = Occ.occ_p_j; jocc_n = Occ.occ_n_j
+    #pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
+    #                                              n_sps,mstates_n,mz_n,vn,Mtot)
     oPP,oNN,oPNu,oPNd = prep_J(tdims,p_sps,n_sps,mstates_p,mstates_n,
                                pbits,nbits)
     mdim = tdims[end]
     lblock=length(pbits)
-    mdim_print(target_nuc,Z,N,cp,cn,vp,vn,mdim,tJ)
+    mdim_print(target_nuc,modelspace,mdim,tJ)
     if mode == "sample"
         for (iter,sntf) in enumerate(Hs)
             @timeit to "make sample" begin
                 println("sntf: $sntf")
-                lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
+                Hamil,modelspace = readsnt(sntf,Anum,target_el)                                
+                SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
                 bV1,V1 = HbitT1(p_sps,n_sps,mstates_p,mstates_n,labels,TBMEs)
                 bVpn,Vpn,delMs = Hbitpn(p_sps,n_sps,mstates_p,mstates_n,
                                         labels[3],TBMEs[3])
@@ -208,7 +215,7 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
         end
     elseif mode =="TD"
         try
-            mkdir("tdmat")
+            mkdir(tdmatdir)
         catch
             nothing
         end
@@ -220,7 +227,7 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
             readRvecs!(mdim,inpf,tJ,svecs,wfinfos;num=num_ev) 
         end
         
-        io=open("./tdmat/wfinfos_"*target_nuc*"_J"*string(tJ)*".dat","w")
+        io=open(tdmatdir*"wfinfos_"*target_nuc*"_J"*string(tJ)*".dat","w")
         for tmp in wfinfos
             println(io,split(tmp[1],"/")[end], " nth= ",tmp[2], " TDmatidx  ",tmp[3])
         end
@@ -271,7 +278,7 @@ function prepEC(Hs,target_nuc,num_ev,num_ECsample,tJ,mode;
                      olabels,oTBMEs,labels,to)
         end
         @timeit to "write TDs" begin
-            oupf="./tdmat/"*target_nuc*"_J"*string(tJ)*".dat"
+            oupf=tdmatdir*target_nuc*"_J"*string(tJ)*".dat"
             lTD = length(p_sps)+length(n_sps)+length(oTBMEs)
             io=open(oupf,"w")
             write(io,Dim)
@@ -341,30 +348,38 @@ Transition densities and overlap matrix for H and N are read from "tdmat/" direc
 """
 function solveEC(Hs,target_nuc,tJNs;
                  write_appwav=false,verbose=false,
-                 calc_moment=true,wpath="./",
+                 calc_moment=true,wpath="./",tdmatpath="./tdmat/",
                  is_show=false,
                  gfactors = [1.0,0.0,5.586,-3.826],
                  effcharge=[1.5,0.5],
+                 truncation_params=[],
                  exact_logf="")
 
     if length(tJNs)==0;println("specify targetJ and # of states");exit();end
     to = TimerOutput()
-    sntf = Hs[1]    
+    sntf = Hs[1]   
     Anum = parse(Int64, match(reg,target_nuc).match)
-    lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
+    target_el = replace.(target_nuc, string(Anum)=>"")
+    Hamil,modelspace = readsnt(sntf,Anum,target_el)    
+    SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
+    p_sps = modelspace.psps; n_sps = modelspace.nsps 
+    cp = modelspace.cp; cn = modelspace.cn
+    vp = modelspace.vp; vn = modelspace.vn
+
     hw, bpar = init_ho_by_mass(Anum,1) # mass formula 
     if 16<= Anum <= 40
         hw, bpar = init_ho_by_mass(Anum,2) # 2: mass formula for sd-shell
     end
-    target_el = replace.(target_nuc, string(Anum)=>"")
-    Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)  
+    #target_el = replace.(target_nuc, string(Anum)=>"")
+    #Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)  
     mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
-    println("nuc: $target_el")
+    #println("nuc: $target_el")
     exlines = ""
     try 
         f = open(exact_logf,"r");exlines = readlines(f);close(f)
     catch
-        println("logfile of exact calc. is missing ")
+        nothing
+        #println("logfile of exact calc. is missing ")
     end
 
     Dims = Int64[]
@@ -374,11 +389,13 @@ function solveEC(Hs,target_nuc,tJNs;
     for (jidx,tmp) in enumerate(tJNs)
         tJ,num_ev_target = tmp
         Mtot = tJ
-        pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
-                                                      n_sps,mstates_n,mz_n,vn,Mtot)
+        Occ = occ(modelspace,Mtot,truncation_params)
+        tdims = Occ.tdims
+        mstates_p = Occ.mstates_p
+        mstates_n = Occ.mstates_n
         mdim = tdims[end]        
         @timeit to "read TDmat" begin
-            inpf = "./tdmat/"*target_nuc*"_J"*string(tJ)*".dat"
+            inpf = tdmatpath*target_nuc*"_J"*string(tJ)*".dat"
             Dim,ln,lTD,Nmat,infos,TDs = read_tdmat(inpf)
             push!(Dims,Dim)
             if Dim+1 <= num_ev_target;
@@ -386,7 +403,7 @@ function solveEC(Hs,target_nuc,tJNs;
                 exit()
             end                
         end
-        println("for J=$tJ/2 states Dim.=$Dim")        
+        #println("for J=$tJ/2 states Dim.=$Dim")        
         @timeit to "Cholesky" begin
             tMat = zeros(Float64,Dim,Dim)
             tildH = zeros(Float64,Dim,Dim)
@@ -408,7 +425,9 @@ function solveEC(Hs,target_nuc,tJNs;
             sntf = Hs[sntidx]
             tMat .= 0.0
             @timeit to "Hmat" begin
-                lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
+                Hamil,modelspace = readsnt(sntf,Anum,target_el)              
+                SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
+                oTBMEs = Hamil.oTBMEs
                 MEs = [SPEs[1],SPEs[2],oTBMEs]
                 MEs = [(MEs...)...]
                 for (idx,TD) in enumerate(TDs)
@@ -419,13 +438,11 @@ function solveEC(Hs,target_nuc,tJNs;
                 @timeit to "Gen. Eigen" begin
                     mul!(tMat,Linv,Hmat)
                     mul!(tildH,Linv',tMat)                                    
-                    #vals,vecs = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
-                    #                              tol=1.e-8, maxiter=300))
-                    valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
-                    vals = @views valsK[1:num_ev_target]
-                    #print_vec("vals ",vals)
-                    #print_vec("valsK",valsK)                    
-                    if verbose;print_vec("En(EC)",vals);end
+                    vals,vecs = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
+                                                  tol=1.e-8, maxiter=300))
+                    if verbose
+                        print_vec("$target_nuc 2J=$tJ  En(EC)",vals)
+                    end
                 end                
                 push!(sumV,[sntf,tJ,vals])
             end
@@ -461,7 +478,7 @@ function solveEC(Hs,target_nuc,tJNs;
     if is_show
         show(to, allocations = true, compact = false)
     end
-    println("")
+    #println("")
     return nothing
 end
 
@@ -481,12 +498,18 @@ function solveEC_UQ(Hs,target_nuc,tJNs,Erefs,errors;
     
     sntf = Hs[1]    
     Anum = parse(Int64, match(reg,target_nuc).match)
-    lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
+    target_el = replace.(target_nuc, string(Anum)=>"")
+    
+    Hamil,modelspace = readsnt(sntf,Anum,target_el)    
+    SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
+    olabels = Hamil.olabels; oTBMEs = Hamil.oTBMEs
+    p_sps = modelspace.psps; n_sps = modelspace.nsps
+    cp = modelspace.cp; cn = modelspace.cn
+    
     hw, bpar = init_ho_by_mass(Anum,1) # mass formula 
     if 16<= Anum <= 40
         hw, bpar = init_ho_by_mass(Anum,2) # 2: mass formula for sd-shell
     end
-    target_el = replace.(target_nuc, string(Anum)=>"")
     Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)  
     mstates_p,mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
     println("nuc: $target_nuc")
@@ -733,12 +756,9 @@ function intMCMC(itnum_MCMC,burnin,var_M,iThetas,Theta,c_Theta,Vint,Vopt,
             end
             BLAS.gemm!('N','N',1.0,Linv,Hmat,0.0,tMat)
             BLAS.gemm!('T','N',1.0,Linv,tMat,0.0,tildH)
-            #@timeit to "Arpack" vals = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
-            #                                             tol=1.e-8, maxiter=300))[1]
-            @timeit to "Krylovkit" begin
-                valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
-                vals = @views valsK[1:num_ev_target]
-            end
+
+            @timeit to "Arpack" vals = real.(Arpack.eigs(tildH,nev=num_ev_target,which=:SR,
+                                                         tol=1.e-8, maxiter=300))[1]
             nllh += L2_llh(vals,Erefs[jidx],errors[jidx])
             if itM > burnin
                 @timeit to "push" for i=1:num_ev_target
@@ -842,14 +862,18 @@ function intMCMC_PT(itnum_MCMC,burnin,var_M,Ts,
                 Eval = @views Evals[jidx]
                 BLAS.gemm!('N','N',1.0,Linv,Hmat,0.0,tMat)
                 BLAS.gemm!('T','N',1.0,Linv,tMat,0.0,tildH)                
+
+                #@timeit to "my_eigval" my_eigvals!(tildH,tMat,Dim,vks,en_s[jidx],
+                #                                   num_ev_target)                
+                #Evals[jidx] .= en_s[jidx][1]               
+                #println("En my ", Evals[jidx]) 
+
+                #@timeit to "Arpack" Evals[jidx] .= real.(
+                #    Arpack.eigs(tildH,nev=num_ev_target,
                 
-                #@timeit to "Arpack" begin
-                #    Eval .= Arpack.eigs(tildH,nev=num_ev_target,
-                #                        which=:SR,tol=1.e-6,maxiter=150)[1]
-                #end
-                @timeit to "Krylovkit" begin
-                    valsK,vecs,kinfo = eigsolve(tildH,num_ev_target,:SR,Float64)
-                    vals = @views valsK[1:num_ev_target]
+                @timeit to "Arpack" begin
+                    Eval .= Arpack.eigs(tildH,nev=num_ev_target,
+                                        which=:SR,tol=1.e-6,maxiter=150)[1]
                 end
                 #println("En Arpack ", Evals[jidx], "\n")
                 nllhs[ridx] += L2_llh(Eval,Erefs[jidx],errors[jidx];T=Ts[ridx])
@@ -1467,7 +1491,7 @@ function calcTBTD(TBTDs,
                   opTBTD1,pjumps,njumps,
                   pbits,nbits,tdims,wfs,idxs,bif_idxs,
                   olabels,oTBMEs,labels,to)
-    @inbounds @threads for k=1:length(idxs)
+    @inbounds @qthreads for k=1:length(idxs)
         #@inbounds for k=1:length(idxs)
         tmp = idxs[k]
         i = tmp.i; j=tmp.j; Nij=tmp.Nth
@@ -1485,7 +1509,7 @@ function calcTBTD(TBTDs,
             Npi = tmp.i;Npf = tmp.f;fac = tmp.fac
             tMi = tdims[bi]+ (Npi-1)*length(nbit)
             tMf = tdims[bi]+ (Npf-1)*length(nbit)                
-            @inbounds @simd for nidx = 1:length(nbit)
+            @inbounds for nidx = 1:length(nbit)
                 Mi = tMi+nidx; Mf = tMf+nidx
                 coeffs[vrank][vidx] += fac .* (w_i[Mf].*w_j[Mi])
             end
@@ -1500,7 +1524,7 @@ function calcTBTD(TBTDs,
             Nni = tmp.i;Nnf = tmp.f;fac = tmp.fac            
             tMi = tdims[bi]+ Nni -lN 
             tMf = tdims[bi]+ Nnf -lN 
-            @inbounds @simd for pidx = 1:length(pbit)
+            @inbounds for pidx = 1:length(pbit)
                 Mi = tMi + pidx*lN; Mf = tMf + pidx*lN
                 coeffs[vrank][vidx] += fac .* (w_i[Mf].*w_j[Mi])
             end 
@@ -1537,23 +1561,6 @@ function calcTBTD(TBTDs,
                 end
             end
         end
-        # if i==j && i==1
-        #     sum=[0.0,0.0,0.0]
-        #     for (vrank,coeff) in enumerate(coeffs)
-        #         for k = 1:length(coeff)
-        #             # if vrank==3 #&& olabels[k][5]== 1
-        #             #     fac = coeff[k]
-        #             #     if abs(fac) < 1.e-8; fac=0.0;end
-        #             #     if fac !=0.0
-        #             #         println(olabels[k], " V:",oTBMEs[k], " < > ", fac)
-        #             #     end
-        #             # end
-        #             sum[vrank] += oTBMEs[k]*coeff[k]
-        #         end
-        #         println("<opT1[rank=$vrank]> ", sum[vrank],"\t")
-        #     end
-        #     print("\n")
-        # end
         for k = 1:3
             TBTDs[Nij] .+= coeffs[k]
         end

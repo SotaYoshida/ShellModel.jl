@@ -43,10 +43,48 @@ struct MiMf
     fac::Float64
 end
 
+
+struct Hamiltonian
+    lp::Int64
+    ln::Int64
+    massop::Int64
+    Aref::Int64
+    p::Float64
+    A::Int64
+    SPEs::Vector{Vector{Float64}}
+    labels::Vector{Vector{Vector{Int64}}}
+    TBMEs::Vector{Vector{Float64}}
+    olabels::Vector{Vector{Int64}}
+    oTBMEs::Vector{Float64}
+end
+
+struct ModelSpace
+    A::Int64
+    Z::Int64
+    N::Int64
+    cp::Int64
+    cn::Int64
+    vp::Int64
+    vn::Int64
+    psps::Vector{Vector{Int64}}
+    nsps::Vector{Vector{Int64}}
+end
+struct SlaterOccs
+    mstates_p::Vector{Vector{Int64}}
+    mstates_n::Vector{Vector{Int64}}
+    pbits::Vector{Vector{Int64}}  
+    nbits::Vector{Vector{Int64}}
+    occ_p_j::Vector{Vector{Vector{Float64}}}
+    occ_n_j::Vector{Vector{Vector{Float64}}}
+    Mps::Vector{Int64}
+    Mns::Vector{Int64}
+    tdims::Vector{Int64}
+end 
+
 """
-    main(sntf,target_nuc,num_ev,target_J;
-         save_wav=false,q=1,is_block=false,is_show=false,num_history=3,lm=100,ls=20,tol=1.e-6,
-         in_wf="",mdimmode=false,calc_moment = false,gfactors = [1.0,0.0,5.586,-3.826],effcharge=[1.5,0.5])
+main(sntf,target_nuc,target_JNs;
+     save_wav=false,q=1,is_block=false,is_show=false,num_history=3,lm=100,ls=20,tol=1.e-6,
+     in_wf="",mdimmode=false,calc_moment = false,gfactors = [1.0,0.0,5.586,-3.826],effcharge=[1.5,0.5])
 
 Digonalize the model-space Hamiltonian 
 
@@ -69,176 +107,209 @@ Digonalize the model-space Hamiltonian
 - `in_wf=""`      path to initial w.f. (for preprocessing) 
 - `mdimmode=false`   `true` => calculate only the M-scheme dimension
 - `calc_moment=false`  `true` => calculate mu&Q moments 
-- `calc_entropy=false`  `true` => calculate entanglement entropy
 - `gfactors=[1.0,0.0,5.586,-3.826]` angular momentum and spin g-factors 
 - `effcgarge=[1.5,0.5]` effective charges 
 """
-function main(sntf,target_nuc,num_ev,target_J;save_wav=false,
+function main(sntf,target_nuc,target_JNs;save_wav=false,
               q=1,is_block=false,is_show=false,
               num_history=3,lm=100,ls=20,tol=1.e-6,
+              embedding = false,
+              truncation_params=[ ],
               in_wf="",mdimmode=false,
               calc_moment = false,
-              calc_entropy = false,
               gfactors = [1.0,0.0,5.586,-3.826],
               effcharge=[1.5,0.5])
     to = TimerOutput()
     Anum = parse(Int64, match(reg,target_nuc).match)
-    lp,ln,cp,cn,massop,Aref,pow,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs = readsnt(sntf,Anum)
-    massformula = 1
-    if 16<= Anum <= 40; massformula = 2;end
+    target_el = replace.(target_nuc, string(Anum)=>"")
+    Hamil,modelspace = readsnt(sntf,Anum,target_el)
+    
+    SPEs = Hamil.SPEs; labels = Hamil.labels; TBMEs = Hamil.TBMEs
+    p_sps = modelspace.psps; n_sps = modelspace.nsps
+    cp = modelspace.cp; cn = modelspace.cn
+    vp = modelspace.vp; vn = modelspace.vn
+
+    idx_massformula = 1
+    if 16<= Anum <= 40; idx_massformula = 2;end
     ## massformula=2: J. Blomqvist and A. Molinari, Nucl. Phys. A106, 545 (1968).
     ## we use this for the sd-shell nuclei
-    hw, bpar = init_ho_by_mass(Anum,massformula)
+    hw, bpar = init_ho_by_mass(Anum,idx_massformula)
 
-    if length(target_J) > 1;
-        println("warn! Multiple J is not supported now.");exit()
+
+    if target_JNs == [ ];
+        target_JNs = [ [-1,10] ]
+    elseif length(target_JNs)==1 && typeof(target_JNs[1]) != Vector{Int64}
+        target_JNs = [ [-1,target_JNs[1]] ]        
     end
-    Mtot = 0;if Anum % 2 != 0; Mtot = 1;end
-    tJ = -1; eval_jj = -1.0
-    if length(target_J) > 0; Mtot = minimum(target_J);tJ=target_J[1];
-        eval_jj = 0.5*tJ*(tJ/2+1) ; end
-    if Anum % 2 != Mtot % 2; println("invalid targetJ $tJ");exit();end
-    target_el = replace.(target_nuc, string(Anum)=>"")
-    Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)
-    mstates_p, mstates_n,mz_p,mz_n = def_mstates(p_sps,n_sps)
-    pbits,nbits,jocc_p,jocc_n,Mps,Mns,tdims = occ(p_sps,mstates_p,mz_p,vp,
-                                                  n_sps,mstates_n,mz_n,vn,Mtot)
-    lblock=length(pbits)
-    mdim = tdims[end]; if mdim==0;exit();end
-
-    mdim_print(target_nuc,Z,N,cp,cn,vp,vn,mdim,tJ)
-    if mdimmode; return nothing;end
-
-    @timeit to "prep. 1bjumps" begin
-        ## bit representation of Hamiltonian operators
-        bV1,V1 = HbitT1(p_sps,n_sps,mstates_p,mstates_n,labels,TBMEs)
-        bVpn,Vpn,delMs = Hbitpn(p_sps,n_sps,mstates_p,mstates_n,labels[3],TBMEs[3])
-
-        ## storing two-body jumps for pp/nn 2b interaction
-        ppinfo = prep_pp(mstates_p,pbits,bV1[1],V1[1])
-        nninfo = prep_nn(mstates_n,nbits,bV1[2],V1[2])
-        bV1 = nothing
-
-        ## storing one-body jumps for pn 2b interaction
-        l_pbit = length(mstates_p);l_nbit = length(mstates_n)
-        bis,bfs,p_NiNfs,n_NiNfs,num_task = prep_pn(lblock,tdims,l_pbit,l_nbit,
-                                                   pbits,nbits,Mps,delMs,bVpn,Vpn)
-        bVpn=nothing
-    end
-    ## distribute task
-    block_tasks = make_distribute(num_task)
-
-    @timeit to "Jcalc." begin
-        oPP,oNN,oPNu,oPNd = prep_J(tdims,p_sps,n_sps,mstates_p,mstates_n,
-                                   pbits,nbits)
-        Js = [ 0.5*Mtot*(0.5*Mtot+1) for i = 1:num_ev]
-        Jtasks = zeros(Int64,lblock)
-        for i = 1:lblock
-            Jtasks[i] = length(pbits[i])*length(nbits[i])
+    for tJN in target_JNs
+        tJ, num_ev = tJN
+        eval_jj = -1.0        
+        Mtot = 0;if Anum % 2 != 0; Mtot = 1;end
+        eval_jj = -1.0
+        if tJ != -1 
+            Mtot = tJ; eval_jj = 0.5*tJ*(tJ/2+1)
         end
-        Jidxs = make_distribute_J(Jtasks)
-    end
+        if Anum % 2 != Mtot % 2; println("invalid targetJ $tJ");exit();end        
+        Occ = occ(modelspace,Mtot,truncation_params,embedding)
+        pbits = Occ.pbits; nbits = Occ.nbits;tdims = Occ.tdims
+        mstates_p = Occ.mstates_p; Mps = Occ.Mps; jocc_p = Occ.occ_p_j
+        mstates_n = Occ.mstates_n; Mns = Occ.Mns; jocc_n = Occ.occ_n_j
 
-    @timeit to "Lanczos" begin
-        en =[ [1.e+4 for j=1:num_ev] for i = 1:num_history]
-        Rvecs = [ zeros(Float64,mdim) for i=1:num_ev]
-        Tmat = zeros(Float64,lm,lm)
-        vks =[]; uks=[];itmin = 1; elit=1
-        doubleLanczos = false
-        if tJ !=-1; doubleLanczos = true;end
-            
-        if is_block #Thick-Restart double Block Lanczos: TRdBL
-            ls_sub = div(ls,q)
-            vks = [ zeros(Float64,q,mdim) for i=1:div(lm,q)]
-            uks = [ zeros(Float64,q,mdim) for i=1:ls_sub*q]
-            Beta_H = zeros(Float64,q,q)
-            V = vks[1]
-            if in_wf !=""
-                try
-                    read_appwav(in_wf,mdim,V,q,true)
-                    bl_QR!(V',Beta_H,mdim,q)
-                catch
-                    println("error @preprocessing: failed to read appwav")
+        lblock=length(pbits)
+        mdim = tdims[end]; if mdim==0;exit();end
+        mdim_print(target_nuc,modelspace,mdim,tJ)
+        if mdimmode; return nothing;end
+
+        @timeit to "prep. 1bjumps" begin
+            ## bit representation of Hamiltonian operators
+            bV1,V1 = HbitT1(p_sps,n_sps,mstates_p,mstates_n,labels,TBMEs)
+            bVpn,Vpn,delMs = Hbitpn(p_sps,n_sps,mstates_p,mstates_n,labels[3],TBMEs[3])
+
+            ## storing two-body jumps for pp/nn 2b interaction
+            ppinfo = prep_pp(mstates_p,pbits,bV1[1],V1[1])
+            nninfo = prep_nn(mstates_n,nbits,bV1[2],V1[2])
+            bV1 = nothing
+
+            ## storing one-body jumps for pn 2b interaction
+            l_pbit = length(mstates_p);l_nbit = length(mstates_n)
+            bis,bfs,p_NiNfs,n_NiNfs,num_task = prep_pn(lblock,tdims,l_pbit,l_nbit,
+                                                    pbits,nbits,Mps,delMs,bVpn,Vpn)
+            bVpn=nothing
+        end
+        ## distribute task
+        block_tasks = make_distribute(num_task)
+
+        @timeit to "Jcalc." begin
+            oPP,oNN,oPNu,oPNd = prep_J(tdims,p_sps,n_sps,mstates_p,mstates_n,
+                                       pbits,nbits)
+            Js = [ 0.5*Mtot*(0.5*Mtot+1) for i = 1:num_ev]
+            Jtasks = zeros(Int64,lblock)
+            for i = 1:lblock
+                Jtasks[i] = length(pbits[i])*length(nbits[i])
+            end
+            Jidxs = make_distribute_J(Jtasks)
+        end
+
+        @timeit to "Lanczos" begin
+            en =[ [1.e+4 for j=1:num_ev] for i = 1:num_history]
+            Rvecs = [ zeros(Float64,mdim) for i=1:num_ev]
+            Tmat = zeros(Float64,lm,lm)
+            vks =[]; uks=[];itmin = 1; elit=1
+            doubleLanczos = false
+            if tJ !=-1; doubleLanczos = true;end
+                
+            if is_block #Thick-Restart double Block Lanczos: TRdBL
+                ls_sub = div(ls,q)
+                vks = [ zeros(Float64,q,mdim) for i=1:div(lm,q)]
+                uks = [ zeros(Float64,q,mdim) for i=1:ls_sub*q]
+                Beta_H = zeros(Float64,q,q)
+                V = vks[1]
+                if in_wf !=""
+                    try
+                        read_appwav(in_wf,mdim,V,q,true,is_block)
+                        bl_QR!(V',Beta_H,mdim,q)
+                    catch
+                        println("error @preprocessing: failed to read appwav")
+                        initialize_bl_wav(mdim,q,vks[1])
+                        bl_QR!(V',Beta_H,mdim,q)
+                    end
+                else
                     initialize_bl_wav(mdim,q,vks[1])
                     bl_QR!(V',Beta_H,mdim,q)
                 end
-            else
-                initialize_bl_wav(mdim,q,vks[1])
-                bl_QR!(V',Beta_H,mdim,q)
+                elit = TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
+                            ppinfo,nninfo,bis,bfs,block_tasks,
+                            p_NiNfs,n_NiNfs,Mps,delMs,Vpn,tdims,
+                            eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+                            num_ev,num_history,lm,ls_sub,en,tol,to,doubleLanczos)
+            else #Thick Restart (double) Lanczos: TRL
+                vks = [ zeros(Float64,mdim) for i=1:lm]
+                uks = [ zeros(Float64,mdim) for i=1:ls]
+                if in_wf==""
+                    initialize_wf(vks[1],"rand",tJ,mdim)
+                else
+                    read_appwav(in_wf,mdim,vks[1],1,true,is_block)
+                end
+                elit = TRL(vks,uks,Tmat,itmin,
+                        pbits,nbits,jocc_p,jocc_n,SPEs,
+                        ppinfo,nninfo,bis,bfs,block_tasks,
+                        p_NiNfs,n_NiNfs,Mps,delMs,Vpn,
+                        eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
+                        tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos)
             end
-            elit = TRBL(q,vks,uks,Tmat,Beta_H,pbits,nbits,jocc_p,jocc_n,SPEs,
-                         ppinfo,nninfo,bis,bfs,block_tasks,
-                         p_NiNfs,n_NiNfs,Mps,delMs,Vpn,tdims,
-                         eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
-                         num_ev,num_history,lm,ls_sub,en,tol,to,doubleLanczos)            
-        else #Thick Restart (double) Lanczos: TRL
-            vks = [ zeros(Float64,mdim) for i=1:lm]
-            uks = [ zeros(Float64,mdim) for i=1:ls]                
-            initialize_wf(vks[1],"rand",tJ,mdim)
-            elit = TRL(vks,uks,Tmat,itmin,
-                       pbits,nbits,jocc_p,jocc_n,SPEs,
-                       ppinfo,nninfo,bis,bfs,block_tasks,
-                       p_NiNfs,n_NiNfs,Mps,delMs,Vpn,
-                       eval_jj,oPP,oNN,oPNu,oPNd,Jidxs,
-                       tdims,num_ev,num_history,lm,ls,en,tol,to,doubleLanczos)
         end
-    end
 
-    @timeit to "Rvecs" begin
-        vals,vecs = eigen(@views Tmat[1:elit*q,1:elit*q])
-        @inbounds for (nth,Rvec) in enumerate(Rvecs)
-            if is_block == false
-                @inbounds for k=1:length(vals)
-                    Rvec .+= vecs[k,nth] .* vks[k]
+        @timeit to "Rvecs" begin
+            vals,vecs = eigen(@views Tmat[1:elit*q,1:elit*q])
+            @inbounds for (nth,Rvec) in enumerate(Rvecs)
+                if is_block == false
+                    @inbounds for k=1:length(vals)
+                        Rvec .+= vecs[k,nth] .* vks[k]
+                    end
+                else
+                    @inbounds for k=1:length(vals)
+                        it = div(k-1,q)
+                        b = k - q*it 
+                        Rvec .+= @views vecs[k,nth] .* vks[it+1][b,:]
+                    end
                 end
-            else
-                @inbounds for k=1:length(vals)
-                    it = div(k-1,q)
-                    b = k - q*it 
-                    Rvec .+= @views vecs[k,nth] .* vks[it+1][b,:]
-                end
+                Rvec .*= 1.0/sqrt(dot(Rvec,Rvec))
+                # if false # <H> check
+                #     Hv .= 0.0
+                #     operate_H!(Rvecs[nth],Hv,
+                #                pbits,nbits,
+                #                jocc_p,jocc_n,SPEs,
+                #                ppinfo,nninfo,
+                #                tdims,bis,bfs,block_tasks,
+                #                p_NiNfs,n_NiNfs,Vpn,Mps,delMs,to)
+                #     if nth == 1; print("<v|H|v> ");end
+                #     print(" ", dot(Rvecs[nth],Hv))
+                #     if nth==num_ev;println("");end
+                # end
             end
-            Rvec .*= 1.0/sqrt(dot(Rvec,Rvec))
+        end   
+        vt = zeros(Float64,mdim)
+        for (nth,Rv) in enumerate(Rvecs)
+            vt .= 0.0
+            operate_J!(Rv,vt,pbits,nbits,tdims,
+                    Jidxs,oPP,oNN,oPNu,oPNd)
+            Js[nth] += dot(Rv,vt)
+        end
+        totJs = J_from_JJ1.(Js)
+        #println("totJs $totJs")
+        tx_mom =""
+        if calc_moment 
+            tx_mom = eval_moment(Mtot,Rvecs,totJs,p_sps,n_sps,
+                                mstates_p,mstates_n,tdims,
+                                jocc_p,jocc_n,pbits,nbits,bpar,
+                                gfactors,effcharge)
+        end        
+        if save_wav
+            @timeit to "I/O" begin
+                csnt = split(split(sntf,"/")[end],".")[1]
+                oupf="./"*target_nuc*"_"*csnt*".wav"
+                if tJ != -1;oupf="./"*target_nuc*"_"*csnt*"_j"*string(tJ)*".wav";end
+                writeRitzvecs(mdim,Mtot,en[1],totJs,Rvecs,oupf)
+            end
+        end
+        #println("sntf: $sntf")
+        if tJ == -1
+            print("J= $totJs \nEn. ")
+        else        
+            print("2J= $tJ \nEn. ")
+        end
+        map(x -> @printf("%9.3f ",x), en[1])  
+        if length(target_JNs) == 0
+            print("\nEx. ")
+            map(x -> @printf("%9.3f ",x),[en[1][i]-en[1][1] for i=1:num_ev])
+        end
+        print("\n")
+        if tx_mom != ""
+            println(tx_mom)
         end
     end
-    vt = zeros(Float64,mdim)
-    for (nth,Rv) in enumerate(Rvecs)
-        vt .= 0.0
-        operate_J!(Rv,vt,pbits,nbits,tdims,
-                   Jidxs,oPP,oNN,oPNu,oPNd)
-        Js[nth] += dot(Rv,vt)
-    end
-    totJs = J_from_JJ1.(Js)
-    ### entanglement entropy 
-    if calc_entropy
-        entropy(Rvecs,pbits,nbits,tdims,to)
-    end
-    ### mu&Q-moment
-    tx_mom =""
-    if calc_moment 
-        tx_mom = eval_moment(Mtot,Rvecs,totJs,p_sps,n_sps,
-                             mstates_p,mstates_n,tdims,
-                             jocc_p,jocc_n,pbits,nbits,bpar,
-                             gfactors,effcharge)
-    end        
-    if save_wav
-        @timeit to "I/O" begin
-            csnt = split(split(sntf,"/")[end],".")[1]
-            oupf="./"*target_nuc*"_"*csnt*".wav"
-            if tJ != -1;oupf="./"*target_nuc*"_"*csnt*"_j"*string(tJ)*".wav";end
-            writeRitzvecs(mdim,Mtot,en[1],totJs,Rvecs,oupf)
-        end
-    end    
     if is_show
         show(to, allocations = true,compact = true);println("")
-    end
-    println("sntf: $sntf")
-    println("J $totJs")
-    print("En. ");map(x -> @printf("%9.3f ",x), en[1])
-    print("\nEx. ");map(x -> @printf("%9.3f ",x),[en[1][i]-en[1][1] for i=1:num_ev])
-    print("\n")
-    if tx_mom != ""
-        println(tx_mom)
     end
     return nothing
 end
@@ -247,10 +318,8 @@ function rm_comment(lines)
     nlines = []
     for line in lines
         line = strip(line)
-        if length(line)>1
-            if startswith(line,"!")
-                continue
-            end
+        if length(line)>0 && startswith(line,"!")
+            continue
         end
         push!(nlines,line)
     end
@@ -278,7 +347,7 @@ To read interaction file in ".snt" format.
     A .snt file can be ordered to be a<=b,c<=d,a<=c for V(abcd;J) by the Python script "ShellModel.jl/src/make_ordered_snt.py"(, which will be replaced by Julia implementation...).
 
 """
-function readsnt(sntf,Anum) 
+function readsnt(sntf,Anum,target_el) 
     f = open(sntf,"r");tlines = readlines(f);close(f)
     lines = rm_comment(tlines)
     line = lines[1]
@@ -300,18 +369,19 @@ function readsnt(sntf,Anum)
         if i<=lp;idx=1;else;idx=2;j-=lp;end
         SPEs[idx][j] =parse(Float64,rm_nan(split(lines[1+ln+lp+1+i]," "))[3])
     end
-    ntbme,massop,Aref,p = rm_nan(split(lines[1+ln+lp+1+nsp+1]," "))
+    p = 0.0
+    tmp = rm_nan(split(lines[1+ln+lp+1+nsp+1]," "))
+    ntbme,massop,Aref = tmp[1:3]
+    if length(tmp)>3; p = tmp[4];end
     ntbme = parse(Int,ntbme); massop=parse(Int,massop)
     Aref = parse(Int,Aref); p = parse(Float64,p)
-    labels = [ [ [0,0] ] for i=1:3]
-    olabels = [ [0,0] ]
-    for i=1:3; deleteat!(labels[i],1);end
-    deleteat!(olabels,1)
+    labels = [ [ [0,0] ] for i=1:3];for i=1:3; deleteat!(labels[i],1);end
+    olabels = [ [0,0] ];deleteat!(olabels,1)
     TBMEs=[ Float64[] for i =1:3] #pp/nn/pn
     oTBMEs= Float64[]
     @inbounds for ith = 1:ntbme
         tmp = rm_nan(split(lines[1+ln+lp+1+nsp+1+ith], " "))
-        i = tmp[1]; j = tmp[2]; k = tmp[3]; l =tmp[4]; totJ = tmp[5];  TBME= tmp[6]        
+        i = tmp[1]; j = tmp[2]; k = tmp[3]; l =tmp[4]; totJ = tmp[5]; TBME= tmp[6]
         i = parse(Int,i);j = parse(Int,j);k = parse(Int,k);l = parse(Int,l);
         nth = 0
         if i<=lp && j<=lp
@@ -321,6 +391,7 @@ function readsnt(sntf,Anum)
         elseif i<=lp && j>lp
             nth = 3
         else
+            println("i $i j $j lp $lp")
             println("err");exit()
         end
         ## snt file must be "ordered"; a<=b & c=d & a<=c
@@ -332,17 +403,22 @@ function readsnt(sntf,Anum)
         end
         push!(labels[nth],[i,j,k,l,parse(Int,totJ),ith])
         push!(TBMEs[nth],TBME)
-
         push!(olabels,[i,j,k,l,parse(Int,totJ),ith])
         push!(oTBMEs,TBME)
     end
-    return lp,ln,cp,cn,massop,Aref,p,p_sps,n_sps,SPEs,olabels,oTBMEs,labels,TBMEs
+    Z,N,vp,vn = getZNA(target_el,Anum,cp,cn)
+
+    hamil = Hamiltonian(lp,ln,massop,Aref,p,Anum,SPEs,labels,TBMEs,olabels,oTBMEs) 
+    ms = ModelSpace(Anum,Z,N,cp,cn,vp,vn,p_sps,n_sps)
+    return hamil, ms
 end
 
-"""
-    def_mstate(p_sps, n_sps)
 
-To define the single particle states specified by n,l,j,mz
+
+"""
+   def_mstates(p_sps,n_sps)
+
+to define the single particle states specified by m_z
 """
 function def_mstates(p_sps,n_sps)
     mstates_p = [[1]]; mstates_n = [[1]]; mz_p = Int64[]; mz_n = Int64[]
@@ -395,6 +471,53 @@ function Mcount!(ln::Int64,mzs::Array{Int64,1},
     return nothing
 end
 
+function truncation(sps,tocc_j,truncation_params)
+    if truncation_params == [];return true;end
+    truncation_type, params = truncation_params  
+    if truncation_type != "occ"
+        println("truncation_type $truncation_type is not supported now!!")
+        exit()
+    end 
+    if truncation_type == "occ"
+        return tf_truncation_occ!(sps,tocc_j,params)
+    end 
+    return true
+end
+
+"""
+truncation scheme by specifying occupation numbers for a given [n,l,j,tz]
+"""
+function tf_truncation_occ!(sps,jocc,params)    
+    TF = true
+    for (nth,param) in enumerate(params)
+        if length(param) != 2 && length(param) != 3
+            println("invalid param: $param")
+            println("params for occ. truncation must be something like\n",
+            " [ [n,l,j,tz], nmax ] (nmin=0) or ",
+            " [ [n,l,j,tz], nmin,max ] ")
+            exit()
+        end
+        n,l,j,tz = param[1] 
+        nmin = nmax = 0
+        if length(param) == 2
+            nmax = param[2]
+        else    
+            nmin = param[2]
+            nmax = param[3]
+        end
+        for k = 1:length(sps)
+            if sps[k] == param[1]
+                #println("sps[k=$k]: ",sps[k], " jocc[k] ", jocc[k])
+                if jocc[k] < nmin || jocc[k] > nmax
+                    return false
+                end 
+            end 
+        end 
+    end 
+    return TF
+end 
+
+
 function possible_mz(nljtz,mstates)
     n,l,j,tz = nljtz
     mzs = Int64[]; midxs=Int64[]
@@ -422,12 +545,7 @@ end
 
 make bit representation of T=1 (proton-proton&neutron-neutron) interactions for each {m_z}
 """
-function HbitT1(p_sps::Array{Array{Int64,1}},
-                n_sps::Array{Array{Int64,1}},
-                mstates_p::Array{Array{Int64,1},1},
-                mstates_n::Array{Array{Int64,1},1},
-                labels::Array{Array{Array{Int64,1},1},1},
-                TBMEs::Array{Array{Float64,1}})
+function HbitT1(p_sps,n_sps,mstates_p,mstates_n,labels,TBMEs)
     lp = length(mstates_p)
     ln = length(mstates_n)
     bV1 = [ bit2b[] for i=1:2 ]
@@ -595,13 +713,9 @@ function deltaf(i::Int64,j::Int64)
 end
 
 """
-    occ(p_sps::Array{Array{Int64,1}},mstates_p::Array{Array{Int64,1}},mzp::Array{Int64,1},num_vp::Int64,
-        n_sps::Array{Array{Int64,1}},mstates_n::Array{Array{Int64,1}},mzn::Array{Int64,1},num_vn::Int64,Mtot::Int64)
+    occ(modelspace,Mtot,truncation_params)
 
 prepare bit representations of proton/neutron Slater determinants => pbits/nbits
-
-jocc_p, jocc_n: corresponding occupation numbers for a "j" state,  
-which is used for one-body operation and OBTDs.  
 
 Mps/Mns: total M for proton/neutron "blocks"
 
@@ -613,30 +727,47 @@ tdims: array of cumulative number of M-scheme dimensions for "blocks"
 tdims =[ # of possible configurations of (-3,3),  
          # of possible configurations of (-1,1),...]  
 """
-function occ(p_sps::Array{Array{Int64,1}},
-             mstates_p::Array{Array{Int64,1}},
-             mzp::Array{Int64,1},num_vp::Int64,
-             n_sps::Array{Array{Int64,1}},
-             mstates_n::Array{Array{Int64,1}},
-             mzn::Array{Int64,1},num_vn::Int64,
-             Mtot::Int64)
+function occ(modelspace,Mtot,truncation_params)
+    num_vp = modelspace.vp; num_vn = modelspace.vn
+    p_sps = modelspace.psps; n_sps = modelspace.nsps
+    mstates_p,mstates_n,mzp,mzn = def_mstates(p_sps,n_sps)
+    tocc_p_j = zeros(Float64,length(p_sps))
+    tocc_n_j = zeros(Float64,length(n_sps))
+
     lp = length(mzp); ln = length(mzn)
     pDim = binomial(lp,num_vp)
-    occs_p =[ [false for j=1:lp] for i = 1:pDim]
-    all_perm!(lp,num_vp,occs_p)
-
+    alloccs_p =[ [false for j=1:lp] for i = 1:pDim]
+    all_perm!(lp,num_vp,alloccs_p)
     nDim = binomial(ln,num_vn)
-    occs_n =[ [false for j=1:ln] for i = 1:nDim]
-    all_perm!(ln,num_vn,occs_n)
-
+    alloccs_n =[ [false for j=1:ln] for i = 1:nDim]
+    all_perm!(ln,num_vn,alloccs_n)
+    pDim = length(alloccs_p); nDim = length(alloccs_n)
     mdim = 0;tdims=Int64[];push!(tdims,0)
     Mret = Int64[0]; Mps = Int64[]; Mns = Int64[]
+    occs_p = Vector{Bool}[ ]; occs_n = Vector{Bool}[ ]
     for i=1:pDim
-        Mcount!(lp,mzp,occs_p[i],Mret); push!(Mps, Mret[1])
+        tocc = alloccs_p[i]
+        Mcount!(lp,mzp,tocc,Mret)
+        count_jocc!(p_sps,mstates_p,tocc,tocc_p_j)  
+        if !truncation(p_sps,tocc_p_j,truncation_params)            
+            continue
+        end 
+        push!(occs_p, copy(tocc))
+        push!(Mps, Mret[1])
     end
     for i=1:nDim
-        Mcount!(ln,mzn,occs_n[i],Mret); push!(Mns, Mret[1])
+        tocc = alloccs_n[i]
+        Mcount!(ln,mzn,tocc,Mret)
+        count_jocc!(n_sps,mstates_n,tocc,tocc_n_j)  
+        if !truncation(n_sps,tocc_n_j,truncation_params)
+            continue
+        end 
+        push!(occs_n,copy(tocc))
+        push!(Mns, Mret[1])
     end
+    pDim = length(occs_p)
+    nDim = length(occs_n)
+
     Mps = unique(Mps); Mns = unique(Mns)
     sort!(Mps,rev=false); sort!(Mns,rev=true)
     possidxs = []
@@ -654,8 +785,7 @@ function occ(p_sps::Array{Array{Int64,1}},
     for i =1:length(possidxs)
         deleteat!(occ_p_j[i],1);deleteat!(occ_n_j[i],1)
     end
-    tocc_p_j = zeros(Float64,length(p_sps))
-    tocc_n_j = zeros(Float64,length(n_sps))
+
     for ith = 1:length(possidxs)
         ni,nj = possidxs[ith]
         Mp = Mps[ni]; Mn = Mns[nj]
@@ -664,13 +794,14 @@ function occ(p_sps::Array{Array{Int64,1}},
             Mcount!(lp,mzp,occs_p[i],Mret)
             if Mp != Mret[1]; continue;end
             push!(pbits[ith], bitarr_to_int(occs_p[i]))
-            count_jocc!(p_sps,mstates_p,occs_p[i],tocc_p_j)
+            count_jocc!(p_sps,mstates_p,occs_p[i],tocc_p_j)                        
             push!(occ_p_j[ith],copy(tocc_p_j))
             for j=1:nDim
                 Mcount!(ln,mzn,occs_n[j],Mret)
-                if Mret[1] + Mp == Mtot
-                    mdim += 1
-                end
+                count_jocc!(n_sps,mstates_n,occs_n[j],tocc_n_j)
+                if Mret[1] + Mp != Mtot;continue;end
+                #if !truncation(n_sps,tocc_n_j,truncation_params);continue;end
+                mdim += 1
             end
         end
         push!(tdims,mdim)
@@ -687,8 +818,199 @@ function occ(p_sps::Array{Array{Int64,1}},
             end
         end
     end
-    return pbits,nbits,occ_p_j,occ_n_j,Mps,Mns,tdims
+    return SlaterOccs(mstates_p,mstates_n,pbits,nbits,occ_p_j,occ_n_j,Mps,Mns,tdims)
 end
+
+function make_Mocc(occs_p,occs_n,mzp,mzn)
+    pDim = length(occs_p); nDim = length(occs_n)
+    lp = length(mzp); ln = length(mzn)
+    Mret = Int64[0]; Mps = Int64[]; Mns = Int64[]
+    for i=1:pDim
+        tocc = occs_p[i]
+        Mcount!(lp,mzp,tocc,Mret)
+        push!(Mps, Mret[1])
+    end
+    for i=1:nDim
+        tocc = occs_n[i]
+        Mcount!(ln,mzn,tocc,Mret)
+        push!(Mns, Mret[1])
+    end
+    Mps = unique(Mps); Mns = unique(Mns)
+    sort!(Mps,rev=false); sort!(Mns,rev=true)
+    return Mps,Mns
+end
+function make_Mocc(p_sps,n_sps,mstates_p,mstates_n,
+                   alloccs_p,alloccs_n,mzp,mzn,truncation_params)
+    lp = length(mzp); ln = length(mzn)
+    pDim = length(alloccs_p); nDim = length(alloccs_n)
+    Mret = Int64[0]; Mps = Int64[]; Mns = Int64[]
+    tocc_p_j = zeros(Float64,length(p_sps))
+    tocc_n_j = zeros(Float64,length(n_sps))
+    occs_p = Vector{Bool}[ ]; occs_n = Vector{Bool}[ ]
+    for i=1:pDim
+        tocc = alloccs_p[i]
+        Mcount!(lp,mzp,tocc,Mret)
+        count_jocc!(p_sps,mstates_p,tocc,tocc_p_j)  
+        if !truncation(p_sps,tocc_p_j,truncation_params)            
+            continue
+        end 
+        push!(occs_p, copy(tocc))
+        push!(Mps, Mret[1])
+    end
+    for i=1:nDim
+        tocc = alloccs_n[i]
+        Mcount!(ln,mzn,tocc,Mret)
+        count_jocc!(n_sps,mstates_n,tocc,tocc_n_j)  
+        if !truncation(n_sps,tocc_n_j,truncation_params)
+            continue
+        end 
+        push!(occs_n,copy(tocc))
+        push!(Mns, Mret[1])
+    end
+    Mps = unique(Mps); Mns = unique(Mns)
+    sort!(Mps,rev=false); sort!(Mns,rev=true)
+    return Mps,Mns,occs_p,occs_n
+end
+
+
+
+"""
+occ function to embedding truncated vector to full space one
+"""
+function occ(modelspace,Mtot,truncation_params,emb::Bool)
+    num_vp = modelspace.vp; num_vn = modelspace.vn
+    p_sps = modelspace.psps; n_sps = modelspace.nsps
+    mstates_p,mstates_n,mzp,mzn = def_mstates(p_sps,n_sps)
+    lp = length(mzp); ln = length(mzn)
+    pDim = binomial(lp,num_vp); alloccs_p =[ [false for j=1:lp] for i = 1:pDim]
+    all_perm!(lp,num_vp,alloccs_p)
+    nDim = binomial(ln,num_vn); alloccs_n =[ [false for j=1:ln] for i = 1:nDim]
+    all_perm!(ln,num_vn,alloccs_n)
+    pDim = length(alloccs_p); nDim = length(alloccs_n)
+    ## full
+    Mpsf,Mnsf = make_Mocc(alloccs_p,alloccs_n,mzp,mzn)
+    pbitsf,nbitsf,occ_p_j,occ_n_j,tdims=make_bits(p_sps,n_sps,mstates_p,mstates_n,Mpsf,Mnsf,mzp,mzn,alloccs_p,alloccs_n,Mtot)
+    ## truncated
+    Mps,Mns,occs_p,occs_n = make_Mocc(p_sps,n_sps,mstates_p,mstates_n,
+                                     alloccs_p,alloccs_n,mzp,mzn,truncation_params)
+    pbits,nbits,occ_p_j,occ_n_j,tdims = make_bits(p_sps,n_sps,mstates_p,mstates_n,Mps,Mns,mzp,mzn,occs_p,occs_n,Mtot)
+    ##
+    embedding_crsp(Mps,Mpsf,pbits,pbitsf,nbits,nbitsf)
+    return SlaterOccs(mstates_p,mstates_n,pbits,nbits,occ_p_j,occ_n_j,Mps,Mns,tdims)
+end
+
+"""
+To store correspondance between index for vectors w/ and w/o truncation
+"""
+function embedding_crsp(Mps,Mpsf,pbits,pbitsf,nbits,nbitsf)
+    fmdim = 0;tmdim = 0
+    crsp = Vector{Int64}[]
+    for bi = 1:length(Mpsf)
+        pblock_ = pbitsf[bi]
+        nblock_ = nbitsf[bi]
+        tbi = 0
+        for idx = 1:length(Mps)
+            if Mps[idx] == Mpsf[bi]
+                tbi = idx; break
+            end
+        end
+        for pbit_ in pblock_
+            for nbit_ in nblock_
+                fmdim += 1
+                if tbi == 0;continue;end
+                pblock = pbits[tbi]; nblock=nbits[tbi]
+                for pbit in pblock
+                    if pbit != pbit_; continue;end
+                    for nbit in nblock
+                        if nbit != nbit_; continue;end
+                        tmdim +=1
+                        push!(crsp,[fmdim,tmdim])
+                    end
+                end
+            end
+        end 
+    end
+    ##
+    io = open("crsp.bin","w")
+    write(io,length(crsp))
+    for tmp in crsp
+        write(io,tmp[1])
+        write(io,tmp[2])
+    end
+    close(io)
+    return nothing
+end
+
+function make_bits(p_sps,n_sps,mstates_p,mstates_n,
+                   Mps,Mns,mzp,mzn,occs_p,occs_n,Mtot)
+    tocc_p_j = zeros(Float64,length(p_sps))
+    tocc_n_j = zeros(Float64,length(n_sps))
+    pDim = length(occs_p); nDim = length(occs_n)
+    lp = length(mzp); ln = length(mzn)
+    mdim = 0;tdims=Int64[];push!(tdims,0)    
+    Mret = Int64[0]
+    possidxs = Vector{Int64}[ ]
+    nohitps= Int64[]
+    nohitns= Int64[]
+    for i = 1:length(Mps)
+        hit = 0
+        for j = 1:length(Mns)
+            if Mps[i] + Mns[j] == Mtot
+                push!(possidxs,[i,j])
+                hit +=1
+            end
+        end
+        if hit==0;push!(nohitps,i);end
+    end
+    for j = 1:length(Mns)
+        hit = 0
+        for i = 1:length(Mps)
+            if Mps[i] + Mns[j] == Mtot
+                hit +=1
+            end
+        end
+        if hit==0;push!(nohitns,j);end
+    end
+    pbits = [ Int64[] for i=1:length(possidxs) ]
+    nbits = [ Int64[] for i=1:length(possidxs) ]
+    occ_p_j = [ Vector{Int64}[ ] for i=1:length(possidxs) ]
+    occ_n_j = [ Vector{Int64}[ ] for i=1:length(possidxs) ]
+
+    for ith = 1:length(possidxs)
+        ni,nj = possidxs[ith]
+        Mp = Mps[ni]; Mn = Mns[nj]
+        if Mp + Mn != Mtot;println("warn");end
+        for i = 1:pDim
+            Mcount!(lp,mzp,occs_p[i],Mret)
+            if Mp != Mret[1]; continue;end
+            push!(pbits[ith], bitarr_to_int(occs_p[i]))
+            count_jocc!(p_sps,mstates_p,occs_p[i],tocc_p_j)                        
+            push!(occ_p_j[ith],copy(tocc_p_j))
+            for j=1:nDim
+                Mcount!(ln,mzn,occs_n[j],Mret)
+                count_jocc!(n_sps,mstates_n,occs_n[j],tocc_n_j)
+                if Mret[1] + Mp != Mtot;continue;end                
+                mdim += 1
+            end
+        end
+        push!(tdims,mdim)
+    end
+    for ith = 1:length(possidxs)
+        ni,nj = possidxs[ith]
+        Mp = Mps[ni]; Mn = Mns[nj]
+        for j=1:nDim
+            Mcount!(ln,mzn,occs_n[j],Mret)
+            if Mret[1] == Mn
+                push!(nbits[ith], bitarr_to_int(occs_n[j]))
+                count_jocc!(n_sps,mstates_n,occs_n[j],tocc_n_j)
+                push!(occ_n_j[ith],copy(tocc_n_j))
+            end
+        end
+    end
+    deleteat!(Mps,nohitps); deleteat!(Mns,nohitns)
+    return pbits,nbits,occ_p_j,occ_n_j,tdims
+end
+
 
 function TF_connectable(Phi::Int64,bVs::bit2b,TF::Array{Bool,1})
     # bVs = [ bit(Ca^+), bit(Cb^+), bit(Cc), bit(Cd) ]
@@ -805,7 +1127,7 @@ function ThickRestart_J(vks,uks,Tmat,lm,ls,eval_jj,Jtol)
 end
 
 function initialize_wf(v1,method,tJ,mdim)
-#    Random.seed!(123)
+    #Random.seed!(123)
     if method=="rand" || tJ == -1
         v1 .= randn(mdim,)
         v1 ./= sqrt(dot(v1,v1))
@@ -847,7 +1169,7 @@ function read_wav(inpf,mdim,n;all=false,verbose=false)
     end
 end
 
-function read_appwav(inpf,mdim,V,q,verbose=false)
+function read_appwav(inpf,mdim,V,q,verbose=false,is_block=false)
     fid =open(inpf)
     neig = read(fid,Int32)
     if neig < q; println("#(appwav) must be >= q");exit();end
@@ -858,9 +1180,14 @@ function read_appwav(inpf,mdim,V,q,verbose=false)
         println("appwav: $inpf")
         print_vec("Es(n=$neig)",Es)
     end
-    for j=1:q
-        V[j,:] .= [read(fid,Float64) for i=1:mdim]
+    if is_block
+        for j=1:q
+            V[j,:] .= [read(fid,Float64) for i=1:mdim]
+        end
+    else        
+        V .= [read(fid,Float64) for i=1:mdim]
     end
+        
     close(fid)
     return nothing
 end
@@ -1070,7 +1397,6 @@ function print_vec(s,v;ine=false)
     println(s)
 end
 
-
 function calc_1b_jumps!(bi::Int64,bf::Int64,j::Int64,
                         lblock::Int64,tdims::IA,
                         l_pbit::Int64,l_nbit::Int64,
@@ -1139,59 +1465,6 @@ function writeRitzvecs(mdim,mtot,vals,totJs,Rvecs,oupf)
     end
     for nth = 1:num_ev; write(io,Rvecs[nth]); end
     close(io)
-end
-"""
-    entropy(Rvecs,pbits,nbits,tdims,to)
-
-To calculate entanglement entropy (not optimized yet).
-
-```math
-S  = -\\mathrm{Tr} \\rho \\log (\\rho)
-```
-"""
-function entropy(Rvecs,pbits,nbits,tdims,to)
-    pdims = [0];for bi=1:length(pbits);push!(pdims,pdims[end]+length(pbits[bi]));end
-    ndims = [0];for bi=1:length(nbits);push!(ndims,ndims[end]+length(nbits[bi]));end
-    pdim = pdims[end]; ndim = ndims[end]
-    rho_p = zeros(Float64,pdim,pdim)
-    rho_n = zeros(Float64,ndim,ndim)
-    for (n,Rvec) in enumerate(Rvecs)
-        rho_p .= 0.0#; rho_n .= 0.0
-        for bi = 1:length(pbits)
-            idim = tdims[bi]
-            nbit = nbits[bi]
-            ln = length(nbit)
-            pofst = pdims[bi]
-            for (pid_i,pbit_i) in enumerate(pbits[bi])
-                tMi = idim + (pid_i-1)*ln
-                ri = pofst + pid_i
-                for (pid_j,pbit_j) in enumerate(pbits[bi])
-                    if pid_j <pid_i;continue;end
-                    tMj = idim + (pid_j-1)*ln
-                    rj = pofst + pid_j
-                    for nidx =1:ln
-                        Mi = tMi+nidx; Mj = tMj+nidx
-                        tmp = Rvec[Mi] .* Rvec[Mj]
-                        rho_p[ri,rj] += tmp
-                        if ri != rj;rho_p[rj,ri] += tmp;end
-                    end
-                end
-            end
-        end
-        s = -tr( rho_p * log(rho_p) )
-        println("n= $n entropy $s")
-    end
-    return nothing
-end
-
-function make_Hermite!(H,Dim)
-    @inbounds @simd for i = 1:Dim
-        for j=i+1:Dim
-            tmp = 0.5 * (H[i,j] + H[j,i])
-            H[i,j] = tmp; H[j,i]=tmp
-        end
-    end
-    return nothing
 end
 
 function make_distribute(num_task)
@@ -1292,7 +1565,10 @@ function sparse_mat_plot(Mat::Array{Float64,2},ba="")
     plt.close()
 end
 
-function mdim_print(target_nuc,Z,N,cp,cn,vp,vn,mdim,tJ=-1)
+function mdim_print(target_nuc,modelspace,mdim,tJ=-1)
+    cp = modelspace.cp; cn = modelspace.cn
+    vp = modelspace.vp; vn = modelspace.vn
+    Z = modelspace.Z; N = modelspace.N
     s0 = @sprintf "%6s %14s %10s %10s" target_nuc "Z,N=($Z,$N)" "c($cp,$cn)" "v($vp,$vn)"
     if tJ != -1; s0 * " 2J=$tJ ";end
     s1 = @sprintf "%s %12i %s %5.2f %s " "  mdim:" mdim "(" log10(mdim) ")"
