@@ -11,3 +11,6 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 ThreadPools = "b189fb0b-2eb5-4ed4-bc0c-d34c51242431"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 WignerSymbols = "9f57e263-0b3d-5e2e-b1be-24f2bb48858b"
+
+[compat]
+WignerSymbols = "2"
