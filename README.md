@@ -89,15 +89,15 @@ One can specify the number of execution threads like this.
 
 ## To be implemented:  
 
-* truncations 
-* compatibility to other interaction fmt
-* compatibility to wavefunctions by other shell-model codes
-* J-scheme
-* other operators (Gamow-Teller, etc.)
-* spectroscopic factors
-* DMRG
-* MPI parallerization for larger systems
-* and more...
+- [x] truncations  
+- [ ] compatibility to other interaction fmt
+- [ ] compatibility to wavefunctions by other shell-model codes
+- [ ] J-scheme
+- [ ] other operators (Gamow-Teller, etc.)
+- [ ] spectroscopic factors
+- [ ] DMRG
+- [ ] MPI parallerization for larger systems
+- and more...
 
 Any suggestions, feedbacks, and "Issues&Pull requests" are welcomed.
 
