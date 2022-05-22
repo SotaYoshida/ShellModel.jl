@@ -7,6 +7,9 @@
 
 **Julia code for nuclear shell-model calculations**  
 
+**Note:**  
+This package will be merged into [NuclearToolkit.jl](https://github.com/SotaYoshida/NuclearToolkit.jl),
+though the repository will be kept for reproducibility of the published work.
 
 ## Quick Start
 1. Download a Julia binary from [Julialang.org](https://julialang.org/)  
