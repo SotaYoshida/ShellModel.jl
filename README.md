@@ -112,5 +112,5 @@ Any suggestions, feedbacks, and "Issues&Pull requests" are welcomed.
 
 ## How to cite  
 
-For now, [https://arxiv.org/abs/2105.08256](https://arxiv.org/abs/2105.08256)
+[Prog. Theor. Exp. Phys. 2022 053D02 (2022)](https://academic.oup.com/ptep/article/2022/5/053D02/6567885)
 
